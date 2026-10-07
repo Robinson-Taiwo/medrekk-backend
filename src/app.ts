@@ -1,15 +1,23 @@
+import bcrypt from "bcryptjs";
 import cors from "cors";
 import express, { type ErrorRequestHandler, type Express } from "express";
+import rateLimit from "express-rate-limit";
 import { ZodError } from "zod";
+import { AuthService } from "./auth/authService.js";
+import { InMemoryUserRepository } from "./auth/userRepository.js";
 import type { AppConfig } from "./config.js";
 import { createMemoryRepositories, emptyStore, seedDemoData } from "./database/memory.js";
 import type { Repositories } from "./database/repositories.js";
+import { createAttachAuth } from "./middleware/auth.js";
 import { accessRoutes } from "./routes/access.js";
+import { createAuthRouter } from "./routes/auth.js";
 import { emergencyRoutes } from "./routes/emergency.js";
+import { patientRoutes } from "./routes/patients.js";
 import { syncRoutes } from "./routes/sync.js";
 import { AccessService } from "./services/access/accessService.js";
 import { NoopCloudAdapter, type CloudAdapter } from "./services/cloud/rumpty.js";
 import { EmergencyService } from "./services/emergency/emergencyService.js";
+import { PatientService } from "./services/patient/patientService.js";
 import { SyncService } from "./services/sync/syncService.js";
 import { AppError } from "./utils/errors.js";
 
@@ -19,6 +27,9 @@ export interface AppOptions {
   repos?: Repositories;
   cloud?: CloudAdapter;
 }
+
+interface BodyParseError extends Error { type?: string }
+const isBodyParseError = (e: Error): boolean => (e as BodyParseError).type === "entity.parse.failed";
 
 export function buildApp(opts: AppOptions): Express {
   const now = opts.now ?? (() => new Date());
@@ -30,6 +41,24 @@ export function buildApp(opts: AppOptions): Express {
   }
   const cloud = opts.cloud ?? new NoopCloudAdapter();
 
+  // ---- Patients and auth ----
+  const patientService = new PatientService(repos, now);
+  const users = new InMemoryUserRepository();
+  const authService = new AuthService(users, opts.config.JWT_SECRET, patientService);
+  if (opts.config.SEED_DEMO_DATA) {
+    // In-memory create resolves immediately, so void is safe here.
+    void users.create({
+      id: "usr_demo_amaka",
+      email: "amaka@demo.medrekk",
+      passwordHash: bcrypt.hashSync("demo-pass-123", 10),
+      fullName: "Amaka Okafor",
+      role: "PATIENT",
+      patientId: "pat_demo_amaka",
+      facility: null,
+      createdAt: now().toISOString(),
+    });
+  }
+
   const app = express();
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
@@ -37,7 +66,21 @@ export function buildApp(opts: AppOptions): Express {
   app.use(express.json({ limit: "1mb" }));
   app.use((_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); }); // never cache medical data
 
+  // Brute-force protection for credential endpoints only.
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60_000,
+    limit: opts.config.NODE_ENV === "production" ? 10 : 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  app.use("/auth/login", authLimiter);
+  app.use("/auth/register", authLimiter);
+
+  // Must come before the routers so req.auth is set when requireActor runs.
+  app.use(createAttachAuth(authService, opts.config.AUTH_MODE));
   app.get("/health", (_req, res) => { res.json({ ok: true }); });
+  app.use("/auth", createAuthRouter(authService));
+  app.use(patientRoutes(patientService));
   app.use(accessRoutes(new AccessService({ repos, now })));
   app.use(emergencyRoutes(new EmergencyService({ repos, now })));
   app.use(syncRoutes(new SyncService({ repos, cloud })));
@@ -49,9 +92,13 @@ export function buildApp(opts: AppOptions): Express {
       res.status(err.status).json({ error: { code: err.code, message: err.message } });
     } else if (err instanceof ZodError) {
       res.status(400).json({
-        error: { code: "VALIDATION_ERROR", message: "Invalid request.",
-          issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })) },
+        error: {
+          code: "VALIDATION_ERROR", message: "Invalid request.",
+          issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+        },
       });
+    } else if (isBodyParseError(err)) {
+      res.status(400).json({ error: { code: "INVALID_JSON", message: "Request body is not valid JSON." } });
     } else {
       console.error(err);
       res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Something went wrong." } });

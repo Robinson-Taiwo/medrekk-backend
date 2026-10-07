@@ -36,6 +36,32 @@ export const emergencyQuerySchema = z.object({
   reason: z.string().trim().min(3).max(200).default("Emergency QR/ID scan"),
 });
 
+// A patient entering their own information. Status and source are set by the server, never the client.
+export const selfClaimSchema = z.object({
+  category: accessScopeSchema,
+  value: z.string().trim().min(1).max(300),
+});
+export type SelfClaimInput = z.infer<typeof selfClaimSchema>;
+
+const shortList = z.array(z.string().trim().min(1).max(120)).max(20).default([]);
+
+export const emergencyProfileSchema = z.object({
+  criticalAllergies: shortList,
+  criticalConditions: shortList,
+  criticalMedications: shortList,
+  implantedDevices: shortList,
+  importantWarnings: shortList,
+  bloodGroup: z.enum(["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]).optional(),
+  emergencyContact: z
+    .object({
+      name: z.string().trim().min(1).max(120),
+      phone: z.string().trim().min(5).max(30),
+      relationship: z.string().trim().min(1).max(60),
+    })
+    .optional(),
+});
+export type EmergencyProfileInput = z.infer<typeof emergencyProfileSchema>;
+
 const jsonSchema: z.ZodType<Json> = z.lazy(() =>
   z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonSchema), z.record(jsonSchema)]),
 );

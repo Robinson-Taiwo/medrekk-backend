@@ -14,7 +14,7 @@ export interface AccessDeps {
 }
 
 export class AccessService {
-  constructor(private readonly deps: AccessDeps) {}
+  constructor(private readonly deps: AccessDeps) { }
 
   private get repos() { return this.deps.repos; }
   private iso(offsetMs = 0): string { return new Date(this.deps.now().getTime() + offsetMs).toISOString(); }
@@ -92,23 +92,26 @@ export class AccessService {
     return { status: s.status, grantedUntil: s.grantedUntil };
   }
 
-  async getRecord(token: string) {
-    const s = await this.load(token);
-    this.assertUsable(s);
-    if (s.status !== "APPROVED" || !s.grantedUntil) {
-      throw new AppError(409, "ACCESS_NOT_GRANTED", "Access has not been approved yet.");
-    }
-    const data: Partial<Record<AccessScope, ClinicalClaim[]>> = {};
-    for (const scope of s.approvedScopes) data[scope] = await this.repos.records.claimsFor(s.patientId, scope);
-    const patient = await this.repos.patients.findById(s.patientId);
-    await this.audit(s, "RECORD_VIEWED", { informationViewed: s.approvedScopes });
-    return {
-      patient: { name: patient?.fullName ?? "", medrekkCode: patient?.medrekkCode ?? "" },
-      grantedUntil: s.grantedUntil,
-      authorizedScopes: s.approvedScopes,
-      data,
-    };
+async getRecord(token: string) {
+  const s = await this.load(token);
+  this.assertUsable(s);
+  if (s.status !== "APPROVED" || !s.grantedUntil) {
+    throw new AppError(409, "ACCESS_NOT_GRANTED", "Access has not been approved yet.");
   }
+  const data: Partial<Record<AccessScope, Omit<ClinicalClaim, "patientId">[]>> = {};
+  for (const scope of s.approvedScopes) {
+    const claims = await this.repos.records.claimsFor(s.patientId, scope);
+    data[scope] = claims.map(({ patientId: _patientId, ...rest }) => rest);
+  }
+  const patient = await this.repos.patients.findById(s.patientId);
+  await this.audit(s, "RECORD_VIEWED", { informationViewed: s.approvedScopes });
+  return {
+    patient: { name: patient?.fullName ?? "", medrekkCode: patient?.medrekkCode ?? "" },
+    grantedUntil: s.grantedUntil,
+    authorizedScopes: s.approvedScopes,
+    data,
+  };
+}
 
   private assertUsable(s: AccessSession): void {
     if (s.status === "DENIED") throw new AppError(403, "ACCESS_DENIED", "Access denied by patient.");

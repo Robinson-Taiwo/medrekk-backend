@@ -5,6 +5,7 @@ const envSchema = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     PORT: z.coerce.number().int().default(4000),
     AUTH_MODE: z.enum(["dev", "jwt"]).default("dev"),
+    JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
     SEED_DEMO_DATA: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
     CORS_ORIGIN: z.string().default("http://localhost:3000"),
   })

@@ -4,7 +4,12 @@ import { buildApp } from "../src/app.js";
 import type { AppConfig } from "../src/config.js";
 
 const config: AppConfig = {
-  NODE_ENV: "test", PORT: 0, AUTH_MODE: "dev", SEED_DEMO_DATA: true, CORS_ORIGIN: "http://localhost:3000",
+  NODE_ENV: "test",
+  PORT: 0, // keep whatever you already have
+  AUTH_MODE: "dev",
+  JWT_SECRET: "x".repeat(32),
+  SEED_DEMO_DATA: true,
+  CORS_ORIGIN: "http://localhost:3000", // keep your existing values
 };
 const patient = { "x-actor-id": "pat_demo_amaka", "x-actor-role": "PATIENT" };
 const lookup = { medrekkCode: "mrk-82941", patientName: "  amaka  OKAFOR " };
@@ -42,6 +47,20 @@ describe("normal access flow", () => {
     expect(Object.keys(rec.body.data)).toEqual(["ALLERGIES"]);
     expect(JSON.stringify(rec.body)).not.toContain("Metformin");
   });
+
+  it("logs the whole flow and never exposes the internal patient id", async () => {
+  const app = makeApp();
+  const { token, requestId } = await pendingSession(app);
+  await request(app).post(`/patients/me/access-requests/${requestId}/decision`)
+    .set(patient).send({ decision: "APPROVE", approvedScopes: ["ALLERGIES"] }).expect(200);
+  const rec = await request(app).get(`/access/${token}/record`).expect(200);
+  expect(JSON.stringify(rec.body)).not.toContain("pat_demo_amaka");
+  const audit = await request(app).get("/patients/me/audit").set(patient).expect(200);
+  const types: string[] = audit.body.map((e: { type: string }) => e.type);
+  expect(types).toEqual(expect.arrayContaining([
+    "ACCESS_SESSION_STARTED", "ACCESS_REQUESTED", "ACCESS_APPROVED", "RECORD_VIEWED",
+  ]));
+});
 
   it("denied access reveals nothing", async () => {
     const app = makeApp();
@@ -95,6 +114,9 @@ describe("sync", () => {
     expect(b.body.results[0].status).toBe("DUPLICATE");
   });
   it("requires a health worker", async () => {
-    await request(makeApp()).post("/sync/push").set(patient).send({ operations: [op] }).expect(401);
+    await request(makeApp()).post("/sync/push").set(patient).send({ operations: [op] }).expect(403);
+  });
+  it("rejects a request with no credentials", async () => {
+    await request(makeApp()).post("/sync/push").send({ operations: [op] }).expect(401);
   });
 });

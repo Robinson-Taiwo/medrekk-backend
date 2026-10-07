@@ -19,6 +19,7 @@ export function createMemoryRepositories(store: MemoryStore): Repositories {
     patients: {
       findByCode: async (code) => [...store.patients.values()].find((p) => p.medrekkCode === code),
       findById: async (id) => store.patients.get(id),
+      create: async (p) => void store.patients.set(p.id, p),
     },
     sessions: {
       create: async (s) => void sessions.set(s.id, s),
@@ -30,8 +31,13 @@ export function createMemoryRepositories(store: MemoryStore): Repositories {
     records: {
       claimsFor: async (patientId: string, scope: AccessScope) =>
         store.claims.filter((c) => c.patientId === patientId && c.category === scope),
+      allFor: async (patientId: string) => store.claims.filter((c) => c.patientId === patientId),
+      add: async (claim) => void store.claims.push(claim),
     },
-    emergency: { profileFor: async (patientId) => store.emergency.get(patientId) },
+    emergency: {
+      profileFor: async (patientId) => store.emergency.get(patientId),
+      save: async (profile) => void store.emergency.set(profile.patientId, profile),
+    },
     audit: {
       append: async (e) => void audit.push(e),
       listForPatient: async (patientId) => audit.filter((e) => e.patientId === patientId),

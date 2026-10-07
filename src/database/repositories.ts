@@ -5,6 +5,7 @@ import type {
 export interface PatientRepository {
   findByCode(code: string): Promise<Patient | undefined>;
   findById(id: string): Promise<Patient | undefined>;
+  create(patient: Patient): Promise<void>;
 }
 export interface SessionRepository {
   create(session: AccessSession): Promise<void>;
@@ -15,9 +16,12 @@ export interface SessionRepository {
 }
 export interface RecordRepository {
   claimsFor(patientId: string, scope: AccessScope): Promise<ClinicalClaim[]>;
+  allFor(patientId: string): Promise<ClinicalClaim[]>;
+  add(claim: ClinicalClaim): Promise<void>;
 }
 export interface EmergencyRepository {
   profileFor(patientId: string): Promise<EmergencyProfile | undefined>;
+  save(profile: EmergencyProfile): Promise<void>;
 }
 export interface AuditRepository {
   append(event: AuditEvent): Promise<void>;

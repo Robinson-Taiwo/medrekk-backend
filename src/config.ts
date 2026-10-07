@@ -10,6 +10,14 @@ const envSchema = z
     CORS_ORIGIN: z.string().default("http://localhost:3000"),
     // Comma-separated account emails allowed to approve health-worker credentials. Optional; blank means no admins.
     ADMIN_EMAILS: z.string().optional(),
+    // Postgres connection string. When set, data is stored in Postgres instead of memory.
+    DATABASE_URL: z.string().optional(),
+    // 32 random bytes, base64. Encrypts referral share IDs at rest. Required when DATABASE_URL is set.
+    DATA_ENCRYPTION_KEY: z.string().optional(),
+    // Path to the database server's CA certificate (PEM). Keeps full certificate verification on.
+    DATABASE_SSL_CA: z.string().optional(),
+    // "true" encrypts but does not verify the database's identity. Local testing only; refused in production.
+    DATABASE_SSL_INSECURE: z.enum(["true", "false"]).optional(),
   })
   .refine((e) => !(e.NODE_ENV === "production" && e.AUTH_MODE === "dev"), {
     message: "AUTH_MODE=dev is not allowed in production",

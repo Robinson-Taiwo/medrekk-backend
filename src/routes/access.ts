@@ -37,6 +37,15 @@ export function accessRoutes(access: AccessService): Router {
     const actor = requireActor(req, "PATIENT");
     res.json(await access.decide(actor.id, idParams.parse(req.params).id, accessDecisionSchema.parse(req.body)));
   });
+  r.get("/patients/me/access-sessions", async (req, res) => {
+    const actor = requireActor(req, "PATIENT");
+    const { status } = z.object({ status: z.enum(["active", "past"]).default("active") }).parse(req.query);
+    res.json(await access.listSessions(actor.id, status));
+  });
+  r.post("/patients/me/access-sessions/:id/revoke", async (req, res) => {
+    const actor = requireActor(req, "PATIENT");
+    res.json(await access.revoke(actor.id, idParams.parse(req.params).id));
+  });
   r.get("/patients/me/audit", async (req, res) => {
     res.json(await access.auditTrail(requireActor(req, "PATIENT").id));
   });

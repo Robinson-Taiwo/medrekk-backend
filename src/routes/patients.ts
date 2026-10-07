@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireActor } from "../middleware/auth.js";
 import type { PatientService } from "../services/patient/patientService.js";
 import { emergencyProfileSchema, selfClaimSchema } from "../shared/validation.js";
+import { ProfileUpdateSchema } from "../shared/profile.js";
 
 export function patientRoutes(patients: PatientService): Router {
     const r = Router();
@@ -29,6 +30,16 @@ export function patientRoutes(patients: PatientService): Router {
     r.put("/patients/me/emergency-profile", async (req, res) => {
         const actor = requireActor(req, "PATIENT");
         res.json(await patients.updateEmergencyProfile(actor.id, emergencyProfileSchema.parse(req.body)));
+    });
+
+    r.get("/patients/me/profile", async (req, res) => {
+        const actor = requireActor(req, "PATIENT");
+        res.json(await patients.getProfile(actor.id));
+    });
+
+    r.patch("/patients/me/profile", async (req, res) => {
+        const actor = requireActor(req, "PATIENT");
+        res.json(await patients.updateProfile(actor.id, ProfileUpdateSchema.parse(req.body)));
     });
 
     return r;

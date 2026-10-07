@@ -20,6 +20,7 @@ export type AccessLookupInput = z.infer<typeof accessLookupSchema>;
 export const accessRequestSchema = z.object({
   requesterName: z.string().trim().min(2).max(120),
   requesterRole: z.enum(REQUESTER_ROLES),
+  requesterFacility: z.string().trim().max(160).optional().transform((v) => (v ? v : undefined)),
   reason: z.string().trim().min(3).max(300),
   scopes: z.array(accessScopeSchema).min(1).max(ACCESS_SCOPES.length),
   durationMinutes: z.number().int().min(15).max(1440).default(120),

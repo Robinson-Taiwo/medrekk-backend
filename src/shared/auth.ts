@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { CredentialStatus } from './types.js'
+import { normalizePhone } from './phone.js'
 
 export const RoleSchema = z.enum(['PATIENT', 'HEALTH_WORKER'])
 export type Role = z.infer<typeof RoleSchema>
@@ -10,6 +11,12 @@ export const RegisterSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
   role: RoleSchema,
   facility: z.string().trim().max(160).optional(),
+  phone: z
+    .string()
+    .trim()
+    .max(32)
+    .optional()
+    .refine((v) => v === undefined || v === '' || normalizePhone(v) !== null, 'Enter a valid phone number.'),
 })
 export type RegisterInput = z.infer<typeof RegisterSchema>
 
@@ -39,6 +46,7 @@ export interface PublicUser {
   role: Role
   patientId: string | null
   facility: string | null
+  phone: string | null
   credentialStatus: CredentialStatus | null // HEALTH_WORKER only; null for patients
 }
 

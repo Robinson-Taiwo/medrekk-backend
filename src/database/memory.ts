@@ -4,6 +4,8 @@ import type {
 } from "../shared/types.js";
 import type { Repositories } from "./repositories.js";
 
+import type { PatientProfile } from "../shared/profile.js";
+
 export interface MemoryStore {
   patients: Map<string, Patient>;
   claims: ClinicalClaim[];
@@ -13,6 +15,7 @@ export interface MemoryStore {
 /** In-memory adapter used for development/tests/hackathon demo. Swap for a persistent adapter later. */
 export function createMemoryRepositories(store: MemoryStore): Repositories {
   const sessions = new Map<string, AccessSession>();
+  const profiles = new Map<string, PatientProfile>();
   const audit: AuditEvent[] = [];
   const evidence: Evidence[] = [];
   const verifications: VerificationEvent[] = [];
@@ -23,6 +26,10 @@ export function createMemoryRepositories(store: MemoryStore): Repositories {
       findByCode: async (code) => [...store.patients.values()].find((p) => p.medrekkCode === code),
       findById: async (id) => store.patients.get(id),
       create: async (p) => void store.patients.set(p.id, p),
+    },
+    profiles: {
+      get: async (patientId) => profiles.get(patientId),
+      save: async (patientId, profile) => void profiles.set(patientId, profile),
     },
     sessions: {
       create: async (s) => void sessions.set(s.id, s),

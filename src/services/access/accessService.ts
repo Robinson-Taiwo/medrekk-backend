@@ -27,7 +27,9 @@ export class AccessService {
       accessType: "NORMAL",
       occurredAt: this.iso(),
       sessionId: session.id,
-      requesterIdentifier: session.requester ? `${session.requester.name} (${session.requester.role})` : undefined,
+      requesterIdentifier: session.requester
+        ? `${session.requester.name} (${session.requester.role})${session.requester.facility ? `, ${session.requester.facility}` : ""}`
+        : undefined,
       reason: session.requester?.reason,
       ...extra,
     });
@@ -78,7 +80,12 @@ export class AccessService {
     const updated: AccessSession = {
       ...session,
       status: "PENDING",
-      requester: { name: input.requesterName, role: input.requesterRole, reason: input.reason },
+      requester: {
+        name: input.requesterName,
+        role: input.requesterRole,
+        reason: input.reason,
+        ...(input.requesterFacility ? { facility: input.requesterFacility } : {}),
+      },
       requestedScopes: [...new Set(input.scopes)],
       durationMinutes: input.durationMinutes,
       expiresAt: this.iso(SESSION_LIFETIME_MS), // patient gets a fresh window to respond
@@ -134,6 +141,7 @@ export class AccessService {
   private assertUsable(s: AccessSession): void {
     if (s.status === "DENIED") throw new AppError(403, "ACCESS_DENIED", "Access denied by patient.");
     if (s.status === "EXPIRED") throw new AppError(410, "SESSION_EXPIRED", "This access session has expired.");
+    if (s.status === "REVOKED") throw new AppError(403, "ACCESS_REVOKED", "The patient ended this access.");
   }
 
   // ---- patient side ----
@@ -173,6 +181,42 @@ export class AccessService {
     await this.repos.sessions.update(approved);
     await this.audit(approved, "ACCESS_APPROVED", { informationViewed: approved.approvedScopes });
     return { status: approved.status, grantedUntil: approved.grantedUntil };
+  }
+
+  async listSessions(patientId: string, view: "active" | "past") {
+    const all = await this.repos.sessions.listForPatient(patientId);
+    const nowMs = this.deps.now().getTime();
+    return all
+      .filter((s) => s.requester !== undefined && s.status !== "AWAITING_REQUEST" && s.status !== "PENDING")
+      .sort((a, b) => Date.parse(b.decidedAt ?? b.createdAt) - Date.parse(a.decidedAt ?? a.createdAt))
+      .map((s) => {
+        const lapsed = s.status === "APPROVED" && s.grantedUntil !== undefined && Date.parse(s.grantedUntil) <= nowMs;
+        const status: AccessStatus = lapsed ? "EXPIRED" : s.status;
+        return {
+          id: s.id,
+          status,
+          requester: s.requester,
+          requestedScopes: s.requestedScopes,
+          approvedScopes: s.approvedScopes,
+          grantedUntil: s.grantedUntil,
+          decidedAt: s.decidedAt,
+          revokedAt: s.revokedAt,
+        };
+      })
+      .filter((x) => (view === "active" ? x.status === "APPROVED" : x.status !== "APPROVED"));
+  }
+
+  /** The patient ends an approved, still-running access early. The provider loses it immediately. */
+  async revoke(patientId: string, sessionId: string) {
+    const found = await this.repos.sessions.findById(sessionId);
+    if (!found || found.patientId !== patientId) throw new AppError(404, "REQUEST_NOT_FOUND", "Access session not found.");
+    const stillRunning =
+      found.status === "APPROVED" && found.grantedUntil !== undefined && Date.parse(found.grantedUntil) > this.deps.now().getTime();
+    if (!stillRunning) throw new AppError(409, "ACCESS_NOT_ACTIVE", "This access is not active.");
+    const revoked: AccessSession = { ...found, status: "REVOKED", revokedAt: this.iso() };
+    await this.repos.sessions.update(revoked);
+    await this.audit(revoked, "ACCESS_REVOKED", { informationViewed: revoked.approvedScopes });
+    return { status: revoked.status, revokedAt: revoked.revokedAt };
   }
 
   auditTrail(patientId: string) { return this.repos.audit.listForPatient(patientId); }

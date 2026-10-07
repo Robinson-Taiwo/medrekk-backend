@@ -3,6 +3,8 @@ import type {
   VerificationEvent,
 } from "../shared/types.js";
 
+import type { PatientProfile } from "../shared/profile.js";
+
 export interface PatientRepository {
   findByCode(code: string): Promise<Patient | undefined>;
   findById(id: string): Promise<Patient | undefined>;
@@ -43,7 +45,13 @@ export interface SyncRepository {
   save(op: SyncOperation, actorId: string): Promise<void>;
 }
 
+export interface ProfileRepository {
+  get(patientId: string): Promise<PatientProfile | undefined>;
+  save(patientId: string, profile: PatientProfile): Promise<void>;
+}
+
 export interface Repositories {
+  profiles: ProfileRepository;
   patients: PatientRepository;
   sessions: SessionRepository;
   records: RecordRepository;

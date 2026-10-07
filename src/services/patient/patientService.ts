@@ -3,6 +3,7 @@ import type { ClinicalClaim, EmergencyProfile, Patient } from "../../shared/type
 import type { EmergencyProfileInput, SelfClaimInput } from "../../shared/validation.js";
 import { AppError } from "../../utils/errors.js";
 import { generateMedRekkCode, newId } from "../../utils/ids.js";
+import type { Gender, PatientProfile, ProfileUpdateInput } from "../../shared/profile.js";
 
 const MAX_CODE_ATTEMPTS = 10;
 
@@ -14,7 +15,7 @@ const publicProfile = ({ patientId: _patientId, ...rest }: EmergencyProfile): Pu
 
 export class PatientService {
   constructor(
-    private readonly repos: Pick<Repositories, "patients" | "emergency" | "records">,
+    private readonly repos: Pick<Repositories, "patients" | "emergency" | "records" | "profiles">,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -72,6 +73,38 @@ export class PatientService {
     };
     await this.repos.records.add(claim);
     return publicClaim(claim);
+  }
+
+  async getProfile(patientId: string): Promise<{ dateOfBirth: string | null; gender: Gender | null }> {
+    const p = await this.repos.patients.findById(patientId);
+    if (!p) throw new AppError(404, "PATIENT_NOT_FOUND", "Patient record not found.");
+    const profile = await this.repos.profiles.get(patientId);
+    return { dateOfBirth: profile?.dateOfBirth ?? null, gender: profile?.gender ?? null };
+  }
+
+  /** Patient-entered basics. Merges with what is stored. Neither field is clinical. */
+  async updateProfile(
+    patientId: string,
+    input: ProfileUpdateInput,
+  ): Promise<{ dateOfBirth: string | null; gender: Gender | null }> {
+    const p = await this.repos.patients.findById(patientId);
+    if (!p) throw new AppError(404, "PATIENT_NOT_FOUND", "Patient record not found.");
+    if (input.dateOfBirth !== undefined) {
+      const born = Date.parse(input.dateOfBirth + "T00:00:00Z");
+      if (born > this.now().getTime() || input.dateOfBirth < "1900-01-01") {
+        throw new AppError(400, "INVALID_DATE_OF_BIRTH", "Date of birth must be a past date.");
+      }
+    }
+    const existing = await this.repos.profiles.get(patientId);
+    const dateOfBirth = input.dateOfBirth ?? existing?.dateOfBirth;
+    const gender = input.gender ?? existing?.gender;
+    const profile: PatientProfile = {
+      ...(dateOfBirth ? { dateOfBirth } : {}),
+      ...(gender ? { gender } : {}),
+      updatedAt: this.now().toISOString(),
+    };
+    await this.repos.profiles.save(patientId, profile);
+    return { dateOfBirth: profile.dateOfBirth ?? null, gender: profile.gender ?? null };
   }
 
   async getEmergencyProfile(patientId: string): Promise<PublicEmergencyProfile> {

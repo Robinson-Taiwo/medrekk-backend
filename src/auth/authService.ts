@@ -12,6 +12,7 @@ import {
 import type { Patient } from "../shared/types.js";
 import { AppError } from "../utils/errors.js";
 import type { User, UserRepository } from "./userRepository.js";
+import { normalizePhone } from "../shared/phone.js";
 
 const TOKEN_TTL = "12h"; // TODO: short-lived access token + refresh token later
 const BCRYPT_ROUNDS = 10;
@@ -32,6 +33,7 @@ function toPublic(user: User): PublicUser {
     patientId: user.patientId,
     facility: user.facility,
     credentialStatus: user.credentialStatus,
+    phone: user.phone ?? null,
   };
 }
 
@@ -57,6 +59,11 @@ export class AuthService {
     if (await this.users.findByEmail(input.email)) {
       throw new AppError(409, "EMAIL_TAKEN", "An account with this email already exists.");
     }
+    const phone = input.phone ? normalizePhone(input.phone) : null;
+    if (input.phone && !phone) throw new AppError(400, "INVALID_PHONE", "Enter a valid phone number.");
+    if (phone && (await this.users.findByPhone(phone))) {
+      throw new AppError(409, "PHONE_TAKEN", "An account with this phone number already exists.");
+    }
     // A patient is fully functional alone: registration creates the real record, code and emergency profile.
     const patient = input.role === "PATIENT" ? await this.provisioner.provision(input.fullName) : null;
     const user: User = {
@@ -70,6 +77,7 @@ export class AuthService {
       // Anyone can register as a health worker, but cannot clinically verify until approved.
       credentialStatus: input.role === "HEALTH_WORKER" ? "PENDING" : null,
       createdAt: new Date().toISOString(),
+      ...(phone ? { phone } : {}),
     };
     await this.users.create(user);
     return this.issue(user);

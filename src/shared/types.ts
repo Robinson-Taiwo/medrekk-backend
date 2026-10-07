@@ -25,7 +25,7 @@ export const ACCESS_SCOPES = [
 ] as const;
 export type AccessScope = (typeof ACCESS_SCOPES)[number];
 
-export const ACCESS_STATUSES = ["AWAITING_REQUEST", "PENDING", "APPROVED", "DENIED", "EXPIRED"] as const;
+export const ACCESS_STATUSES = ["AWAITING_REQUEST", "PENDING", "APPROVED", "DENIED", "EXPIRED", "REVOKED"] as const;
 export type AccessStatus = (typeof ACCESS_STATUSES)[number];
 
 export const REQUESTER_ROLES = ["DOCTOR", "NURSE", "PHARMACIST", "LAB_SCIENTIST", "OTHER_CLINICIAN"] as const;
@@ -111,7 +111,7 @@ export interface AccessSession {
   tokenHash: string; // sha256 of the opaque URL token; the raw token is never stored
   patientId: string;
   status: AccessStatus;
-  requester?: { name: string; role: RequesterRole; reason: string };
+  requester?: { name: string; role: RequesterRole; reason: string; facility?: string };
   requesterUserId?: string; // set only when the request carried a health-worker account token
   requestedScopes: AccessScope[];
   approvedScopes: AccessScope[];
@@ -120,6 +120,7 @@ export interface AccessSession {
   createdAt: string;
   expiresAt: string; // lifetime of the un-granted session/request
   decidedAt?: string;
+  revokedAt?: string;
 }
 
 export type AuditType =
@@ -131,7 +132,11 @@ export type AuditType =
   | "EVIDENCE_ADDED"
   | "CLAIM_VERIFIED"
   | "EMERGENCY_PROFILE_VERIFIED"
-  | "EMERGENCY_ACCESSED";
+  | "EMERGENCY_ACCESSED"
+  | "REFERRAL_CREATED"
+  | "REFERRAL_VIEWED"
+  | "REFERRAL_REVOKED"
+  | "ACCESS_REVOKED";
 
 export interface AuditEvent {
   id: string;

@@ -6,6 +6,8 @@ import { ZodError } from "zod";
 import { AuthService } from "./auth/authService.js";
 import { InMemoryUserRepository } from "./auth/userRepository.js";
 import type { AppConfig } from "./config.js";
+import type { UserRepository } from "./auth/userRepository.js";
+import type { ReferralRepository } from "./database/referralRepository.js";
 import { createMemoryRepositories, emptyStore, seedDemoData } from "./database/memory.js";
 import type { Repositories } from "./database/repositories.js";
 import { createAttachAuth } from "./middleware/auth.js";
@@ -14,6 +16,9 @@ import { adminRoutes } from "./routes/admin.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { emergencyRoutes } from "./routes/emergency.js";
 import { patientRoutes } from "./routes/patients.js";
+import { createMemoryReferralRepository } from "./database/referralRepository.js";
+import { referralRoutes } from "./routes/referrals.js";
+import { ReferralService } from "./services/referral/referralService.js";
 import { syncRoutes } from "./routes/sync.js";
 import { verificationRoutes } from "./routes/verification.js";
 import { AccessService } from "./services/access/accessService.js";
@@ -30,6 +35,8 @@ export interface AppOptions {
   now?: () => Date;
   repos?: Repositories;
   cloud?: CloudAdapter;
+  users?: UserRepository;
+  referrals?: ReferralRepository;
 }
 
 interface BodyParseError extends Error { type?: string }
@@ -47,7 +54,7 @@ export function buildApp(opts: AppOptions): Express {
 
   // ---- Patients and auth ----
   const patientService = new PatientService(repos, now);
-  const users = new InMemoryUserRepository();
+  const users: UserRepository = opts.users ?? new InMemoryUserRepository();
   const authService = new AuthService(users, opts.config.JWT_SECRET, patientService);
   if (opts.config.SEED_DEMO_DATA) {
     // In-memory create resolves immediately, so void is safe here.
@@ -82,6 +89,7 @@ export function buildApp(opts: AppOptions): Express {
     .filter((e) => e.length > 0);
 
   const accessService = new AccessService({ repos, now });
+  const referralService = new ReferralService({ repos, referrals: opts.referrals ?? createMemoryReferralRepository(), now });
   const verificationService = new VerificationService({ repos, users, access: accessService, now });
   const adminService = new AdminService({ users, adminEmails, now });
 
@@ -91,6 +99,7 @@ export function buildApp(opts: AppOptions): Express {
   app.use(cors({ origin: opts.config.CORS_ORIGIN.split(",").map((o) => o.trim()).filter((o) => o.length > 0) }));
   app.use(express.json({ limit: "1mb" }));
   app.use((_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); }); // never cache medical data
+  app.use((_req, res, next) => { res.setHeader("Referrer-Policy", "no-referrer"); next(); });
 
   // Brute-force protection for credential endpoints only.
   const authLimiter = rateLimit({
@@ -101,12 +110,17 @@ export function buildApp(opts: AppOptions): Express {
   });
   app.use("/auth/login", authLimiter);
   app.use("/auth/register", authLimiter);
+  app.use(
+    "/patients",
+    rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: true, legacyHeaders: false }),
+  );
 
   // Must come before the routers so req.auth is set when requireActor runs.
   app.use(createAttachAuth(authService, opts.config.AUTH_MODE));
   app.get("/health", (_req, res) => { res.json({ ok: true }); });
   app.use("/auth", createAuthRouter(authService));
   app.use(patientRoutes(patientService));
+  app.use(referralRoutes(referralService));
   app.use(accessRoutes(accessService));
   app.use(verificationRoutes(verificationService));
   app.use(adminRoutes(adminService));

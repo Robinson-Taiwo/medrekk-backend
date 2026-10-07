@@ -10,15 +10,19 @@ import { createMemoryRepositories, emptyStore, seedDemoData } from "./database/m
 import type { Repositories } from "./database/repositories.js";
 import { createAttachAuth } from "./middleware/auth.js";
 import { accessRoutes } from "./routes/access.js";
+import { adminRoutes } from "./routes/admin.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { emergencyRoutes } from "./routes/emergency.js";
 import { patientRoutes } from "./routes/patients.js";
 import { syncRoutes } from "./routes/sync.js";
+import { verificationRoutes } from "./routes/verification.js";
 import { AccessService } from "./services/access/accessService.js";
+import { AdminService } from "./services/admin/adminService.js";
 import { NoopCloudAdapter, type CloudAdapter } from "./services/cloud/rumpty.js";
 import { EmergencyService } from "./services/emergency/emergencyService.js";
 import { PatientService } from "./services/patient/patientService.js";
 import { SyncService } from "./services/sync/syncService.js";
+import { VerificationService } from "./services/verification/verificationService.js";
 import { AppError } from "./utils/errors.js";
 
 export interface AppOptions {
@@ -55,14 +59,36 @@ export function buildApp(opts: AppOptions): Express {
       role: "PATIENT",
       patientId: "pat_demo_amaka",
       facility: null,
+      credentialStatus: null,
+      createdAt: now().toISOString(),
+    });
+    // Demo-only approved health worker.
+    void users.create({
+      id: "usr_demo_nurse",
+      email: "nurse@demo.medrekk",
+      passwordHash: bcrypt.hashSync("demo-pass-123", 10),
+      fullName: "Ngozi Eze",
+      role: "HEALTH_WORKER",
+      patientId: null,
+      facility: "Demo Community Clinic",
+      credentialStatus: "APPROVED",
       createdAt: now().toISOString(),
     });
   }
 
+  const adminEmails = (opts.config.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0);
+
+  const accessService = new AccessService({ repos, now });
+  const verificationService = new VerificationService({ repos, users, access: accessService, now });
+  const adminService = new AdminService({ users, adminEmails, now });
+
   const app = express();
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
-  app.use(cors({ origin: opts.config.CORS_ORIGIN }));
+  app.use(cors({ origin: opts.config.CORS_ORIGIN.split(",").map((o) => o.trim()).filter((o) => o.length > 0) }));
   app.use(express.json({ limit: "1mb" }));
   app.use((_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); }); // never cache medical data
 
@@ -81,7 +107,9 @@ export function buildApp(opts: AppOptions): Express {
   app.get("/health", (_req, res) => { res.json({ ok: true }); });
   app.use("/auth", createAuthRouter(authService));
   app.use(patientRoutes(patientService));
-  app.use(accessRoutes(new AccessService({ repos, now })));
+  app.use(accessRoutes(accessService));
+  app.use(verificationRoutes(verificationService));
+  app.use(adminRoutes(adminService));
   app.use(emergencyRoutes(new EmergencyService({ repos, now })));
   app.use(syncRoutes(new SyncService({ repos, cloud })));
 

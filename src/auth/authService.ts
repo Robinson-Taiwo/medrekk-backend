@@ -31,6 +31,7 @@ function toPublic(user: User): PublicUser {
     role: user.role,
     patientId: user.patientId,
     facility: user.facility,
+    credentialStatus: user.credentialStatus,
   };
 }
 
@@ -66,6 +67,8 @@ export class AuthService {
       role: input.role,
       patientId: patient ? patient.id : null,
       facility: input.facility ?? null,
+      // Anyone can register as a health worker, but cannot clinically verify until approved.
+      credentialStatus: input.role === "HEALTH_WORKER" ? "PENDING" : null,
       createdAt: new Date().toISOString(),
     };
     await this.users.create(user);

@@ -1,4 +1,5 @@
-import type { Role } from '../shared/auth'
+import type { Role } from '../shared/auth.js'
+import type { CredentialStatus } from '../shared/types.js'
 
 export interface User {
   id: string
@@ -8,6 +9,7 @@ export interface User {
   role: Role
   patientId: string | null
   facility: string | null
+  credentialStatus: CredentialStatus | null
   createdAt: string
 }
 
@@ -15,6 +17,8 @@ export interface UserRepository {
   findByEmail(email: string): Promise<User | null>
   findById(id: string): Promise<User | null>
   create(user: User): Promise<void>
+  update(user: User): Promise<void>
+  listByRole(role: Role): Promise<User[]>
 }
 
 export class InMemoryUserRepository implements UserRepository {
@@ -33,5 +37,13 @@ export class InMemoryUserRepository implements UserRepository {
   async create(user: User): Promise<void> {
     this.byId.set(user.id, user)
     this.idByEmail.set(user.email, user.id)
+  }
+
+  async update(user: User): Promise<void> {
+    this.byId.set(user.id, user)
+  }
+
+  async listByRole(role: Role): Promise<User[]> {
+    return [...this.byId.values()].filter((u) => u.role === role)
   }
 }

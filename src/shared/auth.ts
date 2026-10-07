@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { CredentialStatus } from './types.js'
 
 export const RoleSchema = z.enum(['PATIENT', 'HEALTH_WORKER'])
 export type Role = z.infer<typeof RoleSchema>
@@ -38,6 +39,7 @@ export interface PublicUser {
   role: Role
   patientId: string | null
   facility: string | null
+  credentialStatus: CredentialStatus | null // HEALTH_WORKER only; null for patients
 }
 
 export interface AuthResponse {

@@ -17,7 +17,8 @@ export class EmergencyService {
       occurredAt: accessedAt, requesterIdentifier: ctx.requesterIdentifier, reason: ctx.reason,
       informationViewed: ["EMERGENCY_PROFILE"],
     });
-    const { patientId: _omit, ...fields } = profile;
+    // The verification method is free text, so it stays off this unauthenticated response.
+    const { patientId: _omit, verificationMethod: _method, ...fields } = profile;
     return { patientName: patient.fullName, emergencyId: patient.medrekkCode, ...fields, accessLoggedAt: accessedAt };
   }
 }

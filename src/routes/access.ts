@@ -12,13 +12,15 @@ export function accessRoutes(access: AccessService): Router {
   const r = Router();
   const lookupLimiter = rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
 
-  // ---- provider (browser, no account) ----
+  // ---- provider (browser, no account needed) ----
   r.post("/access/lookup", lookupLimiter, async (req, res) => {
     res.status(201).json(await access.startSession(accessLookupSchema.parse(req.body)));
   });
   r.post("/access/:session/request", async (req, res) => {
     const { session } = tokenParams.parse(req.params);
-    res.status(202).json(await access.requestAccess(session, accessRequestSchema.parse(req.body)));
+    // Optional: a signed-in health worker links the session to their account, which is what lets them verify later.
+    const requesterUserId = req.auth?.role === "HEALTH_WORKER" ? req.auth.userId : undefined;
+    res.status(202).json(await access.requestAccess(session, accessRequestSchema.parse(req.body), requesterUserId));
   });
   r.get("/access/:session/status", async (req, res) => {
     res.json(await access.getStatus(tokenParams.parse(req.params).session));

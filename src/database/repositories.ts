@@ -1,5 +1,6 @@
 import type {
-  AccessScope, AccessSession, AuditEvent, ClinicalClaim, EmergencyProfile, Patient, SyncOperation,
+  AccessScope, AccessSession, AuditEvent, ClinicalClaim, EmergencyProfile, Evidence, Patient, SyncOperation,
+  VerificationEvent,
 } from "../shared/types.js";
 
 export interface PatientRepository {
@@ -17,7 +18,17 @@ export interface SessionRepository {
 export interface RecordRepository {
   claimsFor(patientId: string, scope: AccessScope): Promise<ClinicalClaim[]>;
   allFor(patientId: string): Promise<ClinicalClaim[]>;
+  findById(claimId: string): Promise<ClinicalClaim | undefined>;
   add(claim: ClinicalClaim): Promise<void>;
+  update(claim: ClinicalClaim): Promise<void>;
+}
+export interface EvidenceRepository {
+  add(evidence: Evidence): Promise<void>;
+  listForClaim(claimId: string): Promise<Evidence[]>;
+}
+export interface VerificationRepository {
+  append(event: VerificationEvent): Promise<void>;
+  listForPatient(patientId: string): Promise<VerificationEvent[]>;
 }
 export interface EmergencyRepository {
   profileFor(patientId: string): Promise<EmergencyProfile | undefined>;
@@ -36,6 +47,8 @@ export interface Repositories {
   patients: PatientRepository;
   sessions: SessionRepository;
   records: RecordRepository;
+  evidence: EvidenceRepository;
+  verifications: VerificationRepository;
   emergency: EmergencyRepository;
   audit: AuditRepository;
   sync: SyncRepository;

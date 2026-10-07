@@ -68,7 +68,8 @@ export class AccessService {
     return expired;
   }
 
-  async requestAccess(token: string, input: AccessRequestInput) {
+  /** requesterUserId is set only when the request carried a valid health-worker token. */
+  async requestAccess(token: string, input: AccessRequestInput, requesterUserId?: string) {
     const session = await this.load(token);
     this.assertUsable(session);
     if (session.status !== "AWAITING_REQUEST") {
@@ -81,6 +82,7 @@ export class AccessService {
       requestedScopes: [...new Set(input.scopes)],
       durationMinutes: input.durationMinutes,
       expiresAt: this.iso(SESSION_LIFETIME_MS), // patient gets a fresh window to respond
+      ...(requesterUserId ? { requesterUserId } : {}),
     };
     await this.repos.sessions.update(updated);
     await this.audit(updated, "ACCESS_REQUESTED", { informationViewed: updated.requestedScopes });
@@ -92,26 +94,42 @@ export class AccessService {
     return { status: s.status, grantedUntil: s.grantedUntil };
   }
 
-async getRecord(token: string) {
-  const s = await this.load(token);
-  this.assertUsable(s);
-  if (s.status !== "APPROVED" || !s.grantedUntil) {
-    throw new AppError(409, "ACCESS_NOT_GRANTED", "Access has not been approved yet.");
+  async getRecord(token: string) {
+    const s = await this.load(token);
+    this.assertUsable(s);
+    if (s.status !== "APPROVED" || !s.grantedUntil) {
+      throw new AppError(409, "ACCESS_NOT_GRANTED", "Access has not been approved yet.");
+    }
+    const data: Partial<Record<AccessScope, Omit<ClinicalClaim, "patientId">[]>> = {};
+    for (const scope of s.approvedScopes) {
+      const claims = await this.repos.records.claimsFor(s.patientId, scope);
+      data[scope] = claims.map(({ patientId: _patientId, ...rest }) => rest);
+    }
+    const patient = await this.repos.patients.findById(s.patientId);
+    await this.audit(s, "RECORD_VIEWED", { informationViewed: s.approvedScopes });
+    return {
+      patient: { name: patient?.fullName ?? "", medrekkCode: patient?.medrekkCode ?? "" },
+      grantedUntil: s.grantedUntil,
+      authorizedScopes: s.approvedScopes,
+      data,
+    };
   }
-  const data: Partial<Record<AccessScope, Omit<ClinicalClaim, "patientId">[]>> = {};
-  for (const scope of s.approvedScopes) {
-    const claims = await this.repos.records.claimsFor(s.patientId, scope);
-    data[scope] = claims.map(({ patientId: _patientId, ...rest }) => rest);
+
+  /**
+   * Used by verification: the session must be approved, unexpired, and requested by this exact worker account.
+   * An anonymous (browser-only) session can never be used to verify.
+   */
+  async authorizeVerifier(token: string, workerUserId: string): Promise<AccessSession> {
+    const s = await this.load(token);
+    this.assertUsable(s);
+    if (s.status !== "APPROVED" || !s.grantedUntil) {
+      throw new AppError(409, "ACCESS_NOT_GRANTED", "Access has not been approved yet.");
+    }
+    if (s.requesterUserId !== workerUserId) {
+      throw new AppError(403, "NOT_SESSION_REQUESTER", "This session was not requested by your account.");
+    }
+    return s;
   }
-  const patient = await this.repos.patients.findById(s.patientId);
-  await this.audit(s, "RECORD_VIEWED", { informationViewed: s.approvedScopes });
-  return {
-    patient: { name: patient?.fullName ?? "", medrekkCode: patient?.medrekkCode ?? "" },
-    grantedUntil: s.grantedUntil,
-    authorizedScopes: s.approvedScopes,
-    data,
-  };
-}
 
   private assertUsable(s: AccessSession): void {
     if (s.status === "DENIED") throw new AppError(403, "ACCESS_DENIED", "Access denied by patient.");

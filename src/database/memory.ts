@@ -1,5 +1,6 @@
 import type {
-  AccessScope, AccessSession, AuditEvent, ClinicalClaim, EmergencyProfile, Patient, SyncOperation,
+  AccessScope, AccessSession, AuditEvent, ClinicalClaim, EmergencyProfile, Evidence, Patient, SyncOperation,
+  VerificationEvent,
 } from "../shared/types.js";
 import type { Repositories } from "./repositories.js";
 
@@ -13,6 +14,8 @@ export interface MemoryStore {
 export function createMemoryRepositories(store: MemoryStore): Repositories {
   const sessions = new Map<string, AccessSession>();
   const audit: AuditEvent[] = [];
+  const evidence: Evidence[] = [];
+  const verifications: VerificationEvent[] = [];
   const syncOps = new Map<string, { op: SyncOperation; actorId: string }>();
 
   return {
@@ -32,7 +35,20 @@ export function createMemoryRepositories(store: MemoryStore): Repositories {
       claimsFor: async (patientId: string, scope: AccessScope) =>
         store.claims.filter((c) => c.patientId === patientId && c.category === scope),
       allFor: async (patientId: string) => store.claims.filter((c) => c.patientId === patientId),
+      findById: async (claimId) => store.claims.find((c) => c.id === claimId),
       add: async (claim) => void store.claims.push(claim),
+      update: async (claim) => {
+        const i = store.claims.findIndex((c) => c.id === claim.id);
+        if (i >= 0) store.claims[i] = claim;
+      },
+    },
+    evidence: {
+      add: async (e) => void evidence.push(e),
+      listForClaim: async (claimId) => evidence.filter((e) => e.claimId === claimId),
+    },
+    verifications: {
+      append: async (v) => void verifications.push(v),
+      listForPatient: async (patientId) => verifications.filter((v) => v.patientId === patientId),
     },
     emergency: {
       profileFor: async (patientId) => store.emergency.get(patientId),

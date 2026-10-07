@@ -1,7 +1,18 @@
-// Shared MedRekk domain types. Runtime constant arrays double as the source of truth for Zod enums.
-
 export const VERIFICATION_STATUSES = ["UNVERIFIED", "SELF_REPORTED", "EVIDENCE_BACKED", "CLINICALLY_VERIFIED"] as const;
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
+
+export const CREDENTIAL_STATUSES = ["PENDING", "APPROVED"] as const;
+export type CredentialStatus = (typeof CREDENTIAL_STATUSES)[number];
+
+export const EVIDENCE_KINDS = [
+  "LAB_REPORT",
+  "PRESCRIPTION",
+  "DOCUMENT",
+  "PREVIOUS_RECORD",
+  "PATIENT_CONFIRMATION",
+  "PROFESSIONAL_CONFIRMATION",
+] as const;
+export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
 export const ACCESS_SCOPES = [
   "ALLERGIES",
@@ -51,6 +62,33 @@ export interface ClinicalClaim {
   evidenceId?: string;
 }
 
+export interface Evidence {
+  id: string;
+  patientId: string;
+  claimId: string;
+  kind: EvidenceKind;
+  description: string;
+  addedByUserId: string;
+  addedByName: string;
+  createdAt: string;
+}
+
+// One row per status change on a claim: who, how, when, and whether the verifier was credential-approved at the time.
+export interface VerificationEvent {
+  id: string;
+  patientId: string;
+  claimId?: string; // absent when the subject is the emergency profile
+  subject?: "CLAIM" | "EMERGENCY_PROFILE";
+  verifierUserId: string;
+  verifierName: string;
+  verifierFacility: string | null;
+  method: string;
+  previousStatus: VerificationStatus;
+  resultingStatus: VerificationStatus;
+  credentialApproved: boolean;
+  verifiedAt: string;
+}
+
 export interface EmergencyProfile {
   patientId: string;
   criticalAllergies: string[];
@@ -62,6 +100,10 @@ export interface EmergencyProfile {
   emergencyContact?: { name: string; phone: string; relationship: string };
   verificationStatus: VerificationStatus;
   lastConfirmedAt?: string;
+  verificationMethod?: string;
+  verifiedAt?: string;
+  verifiedByName?: string;
+  verifiedByFacility?: string | null;
 }
 
 export interface AccessSession {
@@ -70,6 +112,7 @@ export interface AccessSession {
   patientId: string;
   status: AccessStatus;
   requester?: { name: string; role: RequesterRole; reason: string };
+  requesterUserId?: string; // set only when the request carried a health-worker account token
   requestedScopes: AccessScope[];
   approvedScopes: AccessScope[];
   durationMinutes?: number;
@@ -85,6 +128,9 @@ export type AuditType =
   | "ACCESS_APPROVED"
   | "ACCESS_DENIED"
   | "RECORD_VIEWED"
+  | "EVIDENCE_ADDED"
+  | "CLAIM_VERIFIED"
+  | "EMERGENCY_PROFILE_VERIFIED"
   | "EMERGENCY_ACCESSED";
 
 export interface AuditEvent {

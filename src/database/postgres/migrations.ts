@@ -87,6 +87,19 @@ CREATE TABLE referrals (
 CREATE INDEX referrals_patient_idx ON referrals (patient_id, created_at DESC);
 `,
   },
+  {
+    id: "002_encounters",
+    sql: `
+CREATE TABLE encounters (
+  seq bigserial NOT NULL,
+  id text PRIMARY KEY,
+  patient_id text NOT NULL REFERENCES patients (id),
+  worker_user_id text NOT NULL,
+  data jsonb NOT NULL
+);
+CREATE INDEX encounters_patient_idx ON encounters (patient_id, seq);
+`,
+  },
 ];
 
 /** Applies any migration not yet recorded. Each one runs as a single multi-statement query, so it is atomic. */

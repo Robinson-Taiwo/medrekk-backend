@@ -2,6 +2,7 @@ import { buildApp, type AppOptions } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createPool, poolDb } from "./database/postgres/db.js";
 import { migrate } from "./database/postgres/migrations.js";
+import { createPostgresEncounterRepository } from "./database/postgres/encounters.js";
 import { createPostgresReferralRepository } from "./database/postgres/referrals.js";
 import { createPostgresRepositories } from "./database/postgres/repositories.js";
 import { createPostgresUserRepository } from "./database/postgres/users.js";
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
       repos: createPostgresRepositories(db),
       users: createPostgresUserRepository(db),
       referrals: createPostgresReferralRepository(db, key),
+      encounters: createPostgresEncounterRepository(db),
     };
     closeDb = () => pool.end();
     console.log("Storage: Postgres");

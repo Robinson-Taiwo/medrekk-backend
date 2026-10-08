@@ -18,6 +18,9 @@ import { emergencyRoutes } from "./routes/emergency.js";
 import { patientRoutes } from "./routes/patients.js";
 import { createMemoryReferralRepository } from "./database/referralRepository.js";
 import { referralRoutes } from "./routes/referrals.js";
+import { createMemoryEncounterRepository, type EncounterRepository } from "./database/encounterRepository.js";
+import { encounterRoutes } from "./routes/encounters.js";
+import { EncounterService } from "./services/encounter/encounterService.js";
 import { ReferralService } from "./services/referral/referralService.js";
 import { syncRoutes } from "./routes/sync.js";
 import { verificationRoutes } from "./routes/verification.js";
@@ -37,6 +40,7 @@ export interface AppOptions {
   cloud?: CloudAdapter;
   users?: UserRepository;
   referrals?: ReferralRepository;
+  encounters?: EncounterRepository;
 }
 
 interface BodyParseError extends Error { type?: string }
@@ -90,6 +94,11 @@ export function buildApp(opts: AppOptions): Express {
 
   const accessService = new AccessService({ repos, now });
   const referralService = new ReferralService({ repos, referrals: opts.referrals ?? createMemoryReferralRepository(), now });
+  const encounterService = new EncounterService({
+    repos,
+    encounters: opts.encounters ?? createMemoryEncounterRepository(),
+    now,
+  });
   const verificationService = new VerificationService({ repos, users, access: accessService, now });
   const adminService = new AdminService({ users, adminEmails, now });
 
@@ -121,6 +130,7 @@ export function buildApp(opts: AppOptions): Express {
   app.use("/auth", createAuthRouter(authService));
   app.use(patientRoutes(patientService));
   app.use(referralRoutes(referralService));
+  app.use(encounterRoutes(encounterService));
   app.use(accessRoutes(accessService));
   app.use(verificationRoutes(verificationService));
   app.use(adminRoutes(adminService));

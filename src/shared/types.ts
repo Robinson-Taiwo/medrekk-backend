@@ -136,7 +136,9 @@ export type AuditType =
   | "REFERRAL_CREATED"
   | "REFERRAL_VIEWED"
   | "REFERRAL_REVOKED"
-  | "ACCESS_REVOKED";
+  | "ACCESS_REVOKED"
+  | "ENCOUNTER_RECORDED"
+  | "ENCOUNTER_REVIEWED";
 
 export interface AuditEvent {
   id: string;

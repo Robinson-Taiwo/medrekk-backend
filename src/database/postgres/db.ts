@@ -1,3 +1,4 @@
+import { checkServerIdentity as verifyName, type PeerCertificate } from "node:tls";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import type { Client, Pool, PoolConfig, QueryResult, QueryResultRow } from "pg";
@@ -11,6 +12,7 @@ export interface Db {
 export interface SslEnv {
   DATABASE_SSL_CA?: string | undefined;
   DATABASE_SSL_INSECURE?: string | undefined;
+  DATABASE_SSL_SERVERNAME?: string | undefined;
 }
 
 /**
@@ -24,12 +26,21 @@ export function connectionConfig(connectionString: string, env: SslEnv): PoolCon
   url.searchParams.delete("uselibpqcompat");
   const base: PoolConfig = { connectionString: url.toString() };
   if (mode === null || mode === "disable") return base;
-  if (env.DATABASE_SSL_CA) return { ...base, ssl: { ca: readFileSync(env.DATABASE_SSL_CA, "utf8") } };
+  if (env.DATABASE_SSL_CA) {
+    const ca = readFileSync(env.DATABASE_SSL_CA, "utf8");
+    const servername = env.DATABASE_SSL_SERVERNAME ?? process.env.DATABASE_SSL_SERVERNAME;
+    if (!servername) return { ...base, ssl: { ca } };
+    return {
+      ...base,
+      ssl: { ca, checkServerIdentity: (_host: string, cert: PeerCertificate) => verifyName(servername, cert) },
+    };
+  }
   if (env.DATABASE_SSL_INSECURE === "true") return { ...base, ssl: { rejectUnauthorized: false } };
   return { ...base, ssl: true };
 }
 
 export function createPool(connectionString: string, env: SslEnv): Pool {
+  console.log("Database host:", new URL(connectionString).hostname);
   const pool = new pg.Pool({ ...connectionConfig(connectionString, env), max: 10, connectionTimeoutMillis: 10_000 });
   pool.on("error", (err) => console.error("Postgres pool error:", err.message));
   return pool;

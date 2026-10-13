@@ -16,6 +16,8 @@ export type CaptureMethod = (typeof CAPTURE_METHODS)[number];
 export interface DraftItem {
   category: ClaimCategory;
   value: string;
+  /** The exact words in rawInput this was derived from. Kept so a claim can always be traced back. */
+  excerpt?: string;
 }
 
 export interface Encounter {

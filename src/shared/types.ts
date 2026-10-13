@@ -11,6 +11,7 @@ export const EVIDENCE_KINDS = [
   "PREVIOUS_RECORD",
   "PATIENT_CONFIRMATION",
   "PROFESSIONAL_CONFIRMATION",
+  "ORIGINAL_CAPTURE",
 ] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
@@ -60,6 +61,8 @@ export interface ClinicalClaim {
   verifiedAt?: string;
   lastConfirmedAt?: string;
   evidenceId?: string;
+  /** Set when the patient removes a claim they did not author. The row stays for the audit trail. */
+  removedAt?: string;
 }
 
 export interface Evidence {
@@ -137,6 +140,7 @@ export type AuditType =
   | "REFERRAL_VIEWED"
   | "REFERRAL_REVOKED"
   | "ACCESS_REVOKED"
+  | "CLAIM_REMOVED"
   | "ENCOUNTER_RECORDED"
   | "ENCOUNTER_REVIEWED";
 

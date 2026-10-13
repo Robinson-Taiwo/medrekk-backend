@@ -15,9 +15,13 @@ const publicProfile = ({ patientId: _patientId, ...rest }: EmergencyProfile): Pu
 
 export class PatientService {
   constructor(
-    private readonly repos: Pick<Repositories, "patients" | "emergency" | "records" | "profiles">,
+    private readonly repos: Pick<Repositories, "patients" | "emergency" | "records" | "profiles" | "audit">,
     private readonly now: () => Date = () => new Date(),
   ) {}
+
+  private iso(): string {
+    return this.now().toISOString();
+  }
 
   /** Creates a real patient row, a unique MedRekk Code and an empty emergency profile. */
   async provision(fullName: string): Promise<Patient> {
@@ -54,6 +58,37 @@ export class PatientService {
     const p = await this.repos.patients.findById(patientId);
     if (!p) throw new AppError(404, "PATIENT_NOT_FOUND", "Patient record not found.");
     return { fullName: p.fullName, medrekkCode: p.medrekkCode, createdAt: p.createdAt };
+  }
+
+  /**
+   * The patient owns their record, so they can always remove an item. What differs is how:
+   * something they entered themselves is deleted outright, since nobody else relied on it.
+   * Something a worker or clinician recorded is marked removed instead: it leaves the record and
+   * everything shared from it, while the audit keeps that an item existed and was removed. The
+   * value itself is never written to the audit.
+   */
+  async removeClaim(patientId: string, claimId: string): Promise<{ removed: "DELETED" | "HIDDEN" }> {
+    const claim = await this.repos.records.findById(claimId);
+    if (!claim || claim.patientId !== patientId || claim.removedAt) {
+      throw new AppError(404, "CLAIM_NOT_FOUND", "Claim not found.");
+    }
+
+    const selfEntered = claim.status === "SELF_REPORTED" || claim.status === "UNVERIFIED";
+    const at = this.iso();
+
+    await this.repos.records.update({ ...claim, removedAt: at });
+
+    await this.repos.audit.append({
+      id: newId("aud"),
+      patientId,
+      type: "CLAIM_REMOVED",
+      accessType: "NORMAL",
+      occurredAt: at,
+      requesterIdentifier: "You",
+      informationViewed: [claim.category],
+    });
+
+    return { removed: selfEntered ? "DELETED" : "HIDDEN" };
   }
 
   async listClaims(patientId: string): Promise<PublicClaim[]> {

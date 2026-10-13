@@ -10,6 +10,7 @@ export type CaptureEncounterInput = z.infer<typeof captureEncounterSchema>;
 const draftItemSchema = z.object({
   category: z.enum(CLAIM_CATEGORIES),
   value: z.string().trim().min(2).max(300),
+  excerpt: z.string().trim().max(500).optional(),
 });
 
 export const encounterDraftSchema = z.object({

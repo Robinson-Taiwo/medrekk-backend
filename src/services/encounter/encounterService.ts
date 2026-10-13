@@ -4,7 +4,7 @@ import type { Encounter } from "../../shared/encounterTypes.js";
 import type {
   CaptureEncounterInput, EncounterDraftInput, EncounterReviewInput,
 } from "../../shared/encounterValidation.js";
-import type { AccessSession, AuditType, ClinicalClaim } from "../../shared/types.js";
+import type { AccessSession, AuditType, ClinicalClaim, Evidence } from "../../shared/types.js";
 import { AppError } from "../../utils/errors.js";
 import { hashToken, newId } from "../../utils/ids.js";
 
@@ -103,33 +103,48 @@ export class EncounterService {
     return updated;
   }
 
-  /** The worker's corrected list becomes claims. Nothing reaches the record before this. */
+  /**
+   * The worker's corrected list becomes claims. Each claim keeps an ORIGINAL_CAPTURE evidence row
+   * holding the words it came from, so the record can always be traced back to what was said.
+   * That evidence is provenance, not corroboration: claims still start UNVERIFIED.
+   */
   async review(token: string, workerUserId: string, encounterId: string, input: EncounterReviewInput) {
     const found = await this.load(token, workerUserId, encounterId);
     if (found.status === "REVIEWED") {
       throw new AppError(409, "ENCOUNTER_REVIEWED", "This encounter has already been reviewed.");
     }
     const source = found.workerFacility ? `${found.workerName}, ${found.workerFacility}` : found.workerName;
+    const at = this.iso();
     const createdClaimIds: string[] = [];
+
     for (const item of input.items) {
+      const claimId = newId("clm");
+      const evidence: Evidence = {
+        id: newId("evi"),
+        patientId: found.patientId,
+        claimId,
+        kind: "ORIGINAL_CAPTURE",
+        description: item.excerpt && item.excerpt.length > 0 ? item.excerpt : found.rawInput.slice(0, 500),
+        addedByUserId: found.workerUserId,
+        addedByName: source,
+        createdAt: at,
+      };
       const claim: ClinicalClaim = {
-        id: newId("clm"),
+        id: claimId,
         patientId: found.patientId,
         category: item.category,
         value: item.value,
         status: "UNVERIFIED",
         source,
-        lastConfirmedAt: this.iso(),
+        lastConfirmedAt: at,
+        evidenceId: evidence.id,
       };
       await this.deps.repos.records.add(claim);
-      createdClaimIds.push(claim.id);
+      await this.deps.repos.evidence.add(evidence);
+      createdClaimIds.push(claimId);
     }
-    const updated: Encounter = {
-      ...found,
-      status: "REVIEWED",
-      reviewedAt: this.iso(),
-      createdClaimIds,
-    };
+
+    const updated: Encounter = { ...found, status: "REVIEWED", reviewedAt: at, createdClaimIds };
     await this.deps.encounters.update(updated);
     await this.audit(updated, "ENCOUNTER_REVIEWED", [...new Set(input.items.map((i) => i.category))]);
     return updated;
@@ -137,5 +152,15 @@ export class EncounterService {
 
   get(token: string, workerUserId: string, encounterId: string) {
     return this.load(token, workerUserId, encounterId);
+  }
+
+  /** The patient's own provenance view: what was originally said behind one of their claims. */
+  async originFor(patientId: string, claimId: string) {
+    const claim = await this.deps.repos.records.findById(claimId);
+    if (!claim || claim.patientId !== patientId) {
+      throw new AppError(404, "CLAIM_NOT_FOUND", "Claim not found.");
+    }
+    const rows = await this.deps.repos.evidence.listForClaim(claimId);
+    return rows.map(({ patientId: _omit, ...rest }) => rest);
   }
 }

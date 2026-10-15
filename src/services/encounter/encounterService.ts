@@ -182,4 +182,24 @@ export class EncounterService {
     const rows = await this.deps.repos.evidence.listForClaim(claimId);
     return rows.map(({ patientId: _omit, ...rest }) => rest);
   }
+
+  /**
+   * The patient's own view of a visit. Only reviewed encounters are returned: before review nothing
+   * from the note is on their record, and a half-written note would mislead rather than inform.
+   * The draft, the review decisions and the worker's user id stay out of the response.
+   */
+  async encounterForPatient(patientId: string, encounterId: string) {
+    const found = await this.deps.encounters.findById(encounterId);
+    if (!found || found.patientId !== patientId || found.status !== "REVIEWED") {
+      throw new AppError(404, "ENCOUNTER_NOT_FOUND", "Visit not found.");
+    }
+    return {
+      id: found.id,
+      rawInput: found.rawInput,
+      recordedByName: found.workerName,
+      recordedByFacility: found.workerFacility,
+      recordedAt: found.reviewedAt ?? found.createdAt,
+      status: found.status,
+    };
+  }
 }

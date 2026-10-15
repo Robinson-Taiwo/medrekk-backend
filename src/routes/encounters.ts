@@ -42,6 +42,11 @@ export function encounterRoutes(encounters: EncounterService): Router {
     res.json(await encounters.get(session, actor.id, id));
   });
 
+  r.get("/patients/me/encounters/:id", async (req, res) => {
+    const actor = requireActor(req, "PATIENT");
+    res.json(await encounters.encounterForPatient(actor.id, String(req.params.id)));
+  });
+
   r.get("/patients/me/claims/:id/origin", async (req, res) => {
     const actor = requireActor(req, "PATIENT");
     const { id } = z.object({ id: z.string().min(1).max(100) }).parse(req.params);

@@ -24,6 +24,12 @@ export function encounterRoutes(encounters: EncounterService): Router {
     res.json(await encounters.saveDraft(session, actor.id, id, encounterDraftSchema.parse(req.body)));
   });
 
+  r.post("/access/:session/encounters/:id/discard", async (req, res) => {
+    const actor = requireActor(req, "HEALTH_WORKER");
+    const { session, id } = params.parse(req.params);
+    res.json(await encounters.discard(session, actor.id, id));
+  });
+
   r.post("/access/:session/encounters/:id/review", async (req, res) => {
     const actor = requireActor(req, "HEALTH_WORKER");
     const { session, id } = params.parse(req.params);

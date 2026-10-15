@@ -7,7 +7,7 @@ export const CLAIM_CATEGORIES = [
 ] as const;
 export type ClaimCategory = (typeof CLAIM_CATEGORIES)[number];
 
-export const ENCOUNTER_STATUSES = ["CAPTURED", "STRUCTURED", "REVIEWED"] as const;
+export const ENCOUNTER_STATUSES = ["CAPTURED", "STRUCTURED", "REVIEWED", "DISCARDED"] as const;
 export type EncounterStatus = (typeof ENCOUNTER_STATUSES)[number];
 
 export const CAPTURE_METHODS = ["TEXT", "VOICE"] as const;

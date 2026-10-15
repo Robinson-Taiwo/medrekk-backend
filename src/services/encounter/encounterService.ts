@@ -150,6 +150,24 @@ export class EncounterService {
     return updated;
   }
 
+  /**
+   * Abandoning a draft before review. The row stays so the access is still accounted for, and the
+   * patient's history shows that a note was started and dropped. After review the claims exist and
+   * belong to the patient, so this is refused: that would be deleting their record, not a draft.
+   */
+  async discard(token: string, workerUserId: string, encounterId: string) {
+    const found = await this.load(token, workerUserId, encounterId);
+    if (found.status === "REVIEWED") {
+      throw new AppError(409, "ENCOUNTER_REVIEWED", "This encounter was already saved to the record.");
+    }
+    if (found.status === "DISCARDED") return found;
+
+    const updated: Encounter = { ...found, status: "DISCARDED" };
+    await this.deps.encounters.update(updated);
+    await this.audit(updated, "ENCOUNTER_DISCARDED", []);
+    return updated;
+  }
+
   get(token: string, workerUserId: string, encounterId: string) {
     return this.load(token, workerUserId, encounterId);
   }

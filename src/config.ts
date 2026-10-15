@@ -18,6 +18,9 @@ const envSchema = z
     DATABASE_SSL_CA: z.string().optional(),
     // "true" encrypts but does not verify the database's identity. Local testing only; refused in production.
     DATABASE_SSL_INSECURE: z.enum(["true", "false"]).optional(),
+    // Secret the USSD aggregator must send in x-ussd-secret. Left unset, /ussd is open,
+    // which is fine for a local simulator and not for production.
+    USSD_SHARED_SECRET: z.string().min(16).optional(),
   })
   .refine((e) => !(e.NODE_ENV === "production" && e.AUTH_MODE === "dev"), {
     message: "AUTH_MODE=dev is not allowed in production",

@@ -90,6 +90,37 @@ export class AuthService {
     return this.issue(user);
   }
 
+  /**
+   * Sets or clears the number USSD identifies this account by. Normalised to E.164 so the
+   * number the aggregator reports matches what is stored, however the patient typed it.
+   * Clearing it also clears the USSD PIN, which would otherwise be unreachable.
+   */
+  async setPhone(userId: string, raw: string): Promise<PublicUser> {
+    const user = await this.users.findById(userId);
+    if (!user) throw new AppError(401, "UNAUTHENTICATED", "Account no longer exists.");
+
+    if (raw.trim() === "") {
+      await this.users.update({
+        ...user,
+        phone: undefined,
+        ussdPinHash: undefined,
+        ussdPinFailures: 0,
+        ussdLockedUntil: undefined,
+      });
+      return toPublic({ ...user, phone: undefined });
+    }
+
+    const phone = normalizePhone(raw);
+    if (!phone) throw new AppError(400, "INVALID_PHONE", "Enter a valid phone number.");
+    const existing = await this.users.findByPhone(phone);
+    if (existing && existing.id !== user.id) {
+      throw new AppError(409, "PHONE_TAKEN", "An account with this phone number already exists.");
+    }
+    const updated: User = { ...user, phone };
+    await this.users.update(updated);
+    return toPublic(updated);
+  }
+
   async me(userId: string): Promise<PublicUser> {
     const user = await this.users.findById(userId);
     if (!user) throw new AppError(401, "UNAUTHENTICATED", "Account no longer exists.");

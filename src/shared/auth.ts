@@ -20,6 +20,16 @@ export const RegisterSchema = z.object({
 })
 export type RegisterInput = z.infer<typeof RegisterSchema>
 
+/** Setting the number USSD will recognise. An empty string removes it. */
+export const PhoneUpdateSchema = z.object({
+  phone: z
+    .string()
+    .trim()
+    .max(32)
+    .refine((v) => v === '' || normalizePhone(v) !== null, 'Enter a valid phone number.'),
+})
+export type PhoneUpdateInput = z.infer<typeof PhoneUpdateSchema>
+
 export const LoginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1).max(128),

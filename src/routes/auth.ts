@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { AuthService } from "../auth/authService.js";
 import { requireAuth } from "../middleware/auth.js";
-import { LoginSchema, RegisterSchema } from "../shared/auth.js";
+import { LoginSchema, PhoneUpdateSchema, RegisterSchema } from "../shared/auth.js";
 import { AppError } from "../utils/errors.js";
 
 export function createAuthRouter(authService: AuthService): Router {
@@ -18,6 +18,12 @@ export function createAuthRouter(authService: AuthService): Router {
   router.get("/me", requireAuth, async (req, res) => {
     if (!req.auth) throw new AppError(401, "UNAUTHENTICATED", "Authentication required.");
     res.json(await authService.me(req.auth.userId));
+  });
+
+  router.patch("/me/phone", requireAuth, async (req, res) => {
+    if (!req.auth) throw new AppError(401, "UNAUTHENTICATED", "Authentication required.");
+    const { phone } = PhoneUpdateSchema.parse(req.body);
+    res.json(await authService.setPhone(req.auth.userId, phone));
   });
 
   return router;

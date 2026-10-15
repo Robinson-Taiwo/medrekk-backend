@@ -23,6 +23,7 @@ import { encounterRoutes } from "./routes/encounters.js";
 import { EncounterService } from "./services/encounter/encounterService.js";
 import { ReferralService } from "./services/referral/referralService.js";
 import { syncRoutes } from "./routes/sync.js";
+import { ussdRoutes } from "./routes/ussd.js";
 import { verificationRoutes } from "./routes/verification.js";
 import { AccessService } from "./services/access/accessService.js";
 import { AdminService } from "./services/admin/adminService.js";
@@ -30,6 +31,7 @@ import { NoopCloudAdapter, type CloudAdapter } from "./services/cloud/rumpty.js"
 import { EmergencyService } from "./services/emergency/emergencyService.js";
 import { PatientService } from "./services/patient/patientService.js";
 import { SyncService } from "./services/sync/syncService.js";
+import { UssdService } from "./services/ussd/ussdService.js";
 import { VerificationService } from "./services/verification/verificationService.js";
 import { AppError } from "./utils/errors.js";
 
@@ -101,6 +103,7 @@ export function buildApp(opts: AppOptions): Express {
   });
   const verificationService = new VerificationService({ repos, users, access: accessService, now });
   const adminService = new AdminService({ users, adminEmails, now });
+  const ussdService = new UssdService({ repos, users, now });
 
   const app = express();
   app.set("trust proxy", 1);
@@ -123,6 +126,21 @@ export function buildApp(opts: AppOptions): Express {
     "/patients",
     rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: true, legacyHeaders: false }),
   );
+  // Aggregators post USSD steps as application/x-www-form-urlencoded, not JSON. This has
+  // to run before the limiter below, which reads the dialling number out of the body.
+  app.use("/ussd", express.urlencoded({ extended: false, limit: "16kb" }));
+  // Keyed by the dialling number, not the IP: every USSD request arrives from the
+  // aggregator's address, so an IP limit would throttle every patient at once.
+  app.use(
+    "/ussd",
+    rateLimit({
+      windowMs: 60_000,
+      limit: 30,
+      keyGenerator: (req) => String((req.body as { phoneNumber?: unknown } | undefined)?.phoneNumber ?? "unknown"),
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+  );
 
   // Must come before the routers so req.auth is set when requireActor runs.
   app.use(createAttachAuth(authService, opts.config.AUTH_MODE));
@@ -136,6 +154,7 @@ export function buildApp(opts: AppOptions): Express {
   app.use(adminRoutes(adminService));
   app.use(emergencyRoutes(new EmergencyService({ repos, now })));
   app.use(syncRoutes(new SyncService({ repos, cloud })));
+  app.use(ussdRoutes(ussdService, opts.config.USSD_SHARED_SECRET));
 
   app.use((_req, res) => { res.status(404).json({ error: { code: "NOT_FOUND", message: "Route not found." } }); });
 

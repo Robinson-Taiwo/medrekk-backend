@@ -61,6 +61,8 @@ export interface ClinicalClaim {
   verifiedAt?: string;
   lastConfirmedAt?: string;
   evidenceId?: string;
+  /** The encounter this claim was created from, so a visit can be shown as one thing. */
+  encounterId?: string;
   /** Set when the patient removes a claim they did not author. The row stays for the audit trail. */
   removedAt?: string;
 }

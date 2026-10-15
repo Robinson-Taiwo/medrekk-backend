@@ -138,6 +138,7 @@ export class EncounterService {
         source,
         lastConfirmedAt: at,
         evidenceId: evidence.id,
+        encounterId: found.id,
       };
       await this.deps.repos.records.add(claim);
       await this.deps.repos.evidence.add(evidence);

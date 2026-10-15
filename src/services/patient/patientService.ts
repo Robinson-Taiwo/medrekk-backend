@@ -78,6 +78,19 @@ export class PatientService {
 
     await this.repos.records.update({ ...claim, removedAt: at });
 
+    // An allergy the patient put on their emergency card comes off with it. Leaving it there
+    // would show a stranger something the record no longer holds.
+    if (claim.category === "ALLERGIES" && claim.emergencyDecision === "ADDED") {
+      const profile = await this.repos.emergency.profileFor(patientId);
+      if (profile) {
+        await this.repos.emergency.save({
+          ...profile,
+          criticalAllergies: profile.criticalAllergies.filter((entry: string) => entry !== claim.value),
+          lastConfirmedAt: at,
+        });
+      }
+    }
+
     await this.repos.audit.append({
       id: newId("aud"),
       patientId,
@@ -89,6 +102,45 @@ export class PatientService {
     });
 
     return { removed: selfEntered ? "DELETED" : "HIDDEN" };
+  }
+
+  /**
+   * The emergency card is the one part of the record a stranger can read without being approved,
+   * so nothing reaches it unless the patient puts it there. A worker recording an allergy creates
+   * a claim; only this makes it visible on the card.
+   */
+  async decideEmergencyCard(patientId: string, claimId: string, add: boolean): Promise<PublicClaim> {
+    const claim = await this.repos.records.findById(claimId);
+    if (!claim || claim.patientId !== patientId || claim.removedAt) {
+      throw new AppError(404, "CLAIM_NOT_FOUND", "Claim not found.");
+    }
+    if (claim.category !== "ALLERGIES") {
+      throw new AppError(400, "NOT_AN_ALLERGY", "Only an allergy can be added to the emergency card.");
+    }
+
+    const at = this.iso();
+    const profile = await this.repos.emergency.profileFor(patientId);
+    if (!profile) throw new AppError(404, "PROFILE_NOT_FOUND", "Emergency profile not found.");
+
+    const without = profile.criticalAllergies.filter((entry: string) => entry !== claim.value);
+    const criticalAllergies = add ? [...without, claim.value] : without;
+
+    await this.repos.emergency.save({ ...profile, criticalAllergies, lastConfirmedAt: at });
+
+    const updated = { ...claim, emergencyDecision: add ? ("ADDED" as const) : ("DECLINED" as const) };
+    await this.repos.records.update(updated);
+
+    await this.repos.audit.append({
+      id: newId("aud"),
+      patientId,
+      type: "EMERGENCY_CARD_UPDATED",
+      accessType: "NORMAL",
+      occurredAt: at,
+      requesterIdentifier: "You",
+      informationViewed: ["ALLERGIES"],
+    });
+
+    return publicClaim(updated);
   }
 
   async listClaims(patientId: string): Promise<PublicClaim[]> {

@@ -22,6 +22,16 @@ export function patientRoutes(patients: PatientService): Router {
         res.status(201).json(await patients.addSelfClaim(actor.id, selfClaimSchema.parse(req.body)));
     });
 
+    r.post("/patients/me/claims/:id/emergency", async (req, res) => {
+        const actor = requireActor(req, "PATIENT");
+        res.json(await patients.decideEmergencyCard(actor.id, String(req.params.id), true));
+    });
+
+    r.delete("/patients/me/claims/:id/emergency", async (req, res) => {
+        const actor = requireActor(req, "PATIENT");
+        res.json(await patients.decideEmergencyCard(actor.id, String(req.params.id), false));
+    });
+
     r.delete("/patients/me/claims/:id", async (req, res) => {
         const actor = requireActor(req, "PATIENT");
         res.json(await patients.removeClaim(actor.id, String(req.params.id)));

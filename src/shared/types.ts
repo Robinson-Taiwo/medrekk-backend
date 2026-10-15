@@ -63,6 +63,11 @@ export interface ClinicalClaim {
   evidenceId?: string;
   /** The encounter this claim was created from, so a visit can be shown as one thing. */
   encounterId?: string;
+  /**
+   * Whether the patient has decided about putting this on their emergency card, which a stranger
+   * can read without their approval. Unset means they have not been asked yet.
+   */
+  emergencyDecision?: 'ADDED' | 'DECLINED';
   /** Set when the patient removes a claim they did not author. The row stays for the audit trail. */
   removedAt?: string;
 }
@@ -143,6 +148,7 @@ export type AuditType =
   | "REFERRAL_REVOKED"
   | "ACCESS_REVOKED"
   | "CLAIM_REMOVED"
+  | "EMERGENCY_CARD_UPDATED"
   | "ENCOUNTER_DISCARDED"
   | "ENCOUNTER_RECORDED"
   | "ENCOUNTER_REVIEWED";

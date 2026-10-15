@@ -63,12 +63,12 @@ export function createPostgresRepositories(db: Db): Repositories {
     },
     records: {
       claimsFor: (patientId: string, scope: AccessScope) =>
-        selectMany<ClinicalClaim>(db, "SELECT data FROM claims WHERE patient_id = $1 AND category = $2 ORDER BY seq", [
+        selectMany<ClinicalClaim>(db, "SELECT data FROM claims WHERE patient_id = $1 AND category = $2 AND data->>'removedAt' IS NULL ORDER BY seq", [
           patientId,
           scope,
         ]),
       allFor: (patientId: string) =>
-        selectMany<ClinicalClaim>(db, "SELECT data FROM claims WHERE patient_id = $1 ORDER BY seq", [patientId]),
+        selectMany<ClinicalClaim>(db, "SELECT data FROM claims WHERE patient_id = $1 AND data->>'removedAt' IS NULL ORDER BY seq", [patientId]),
       findById: (claimId) => selectOne<ClinicalClaim>(db, "SELECT data FROM claims WHERE id = $1", [claimId]),
       add: (c) =>
         run(db, "INSERT INTO claims (id, patient_id, category, data) VALUES ($1, $2, $3, $4::jsonb)", [

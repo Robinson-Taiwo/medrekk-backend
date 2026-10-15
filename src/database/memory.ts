@@ -40,8 +40,8 @@ export function createMemoryRepositories(store: MemoryStore): Repositories {
     },
     records: {
       claimsFor: async (patientId: string, scope: AccessScope) =>
-        store.claims.filter((c) => c.patientId === patientId && c.category === scope),
-      allFor: async (patientId: string) => store.claims.filter((c) => c.patientId === patientId),
+        store.claims.filter((c) => c.patientId === patientId && c.category === scope && !c.removedAt),
+      allFor: async (patientId: string) => store.claims.filter((c) => c.patientId === patientId && !c.removedAt),
       findById: async (claimId) => store.claims.find((c) => c.id === claimId),
       add: async (claim) => void store.claims.push(claim),
       update: async (claim) => {

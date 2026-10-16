@@ -78,9 +78,32 @@ export interface Evidence {
   claimId: string;
   kind: EvidenceKind;
   description: string;
+  /** Who put this row into MedRekk. Not the same as who issued the document. */
   addedByUserId: string;
   addedByName: string;
   createdAt: string;
+  /**
+   * Where the document itself says it came from, as printed on it. Kept apart from
+   * `description` so it stays answerable later, and apart from `addedByName` because a
+   * patient uploading their own old report is not the lab that issued it. A facility named
+   * here has not vouched for anything; only a VerificationEvent means that.
+   */
+  origin?: {
+    facility?: string;
+    clinician?: string;
+    /** The date on the paper, not the day it was captured. */
+    documentDate?: string;
+  };
+  /**
+   * SHA-256 of the captured image, hex. The image itself is not stored, so this is what
+   * lets a copy the patient still holds be proved identical to the one reviewed here.
+   */
+  imageHash?: string;
+  /**
+   * How the text got here. Read off the document by OCR is evidence; typed from memory is
+   * recollection. A reader cannot weigh `origin` without knowing which.
+   */
+  captureMethod?: "OCR" | "TYPED" | "DICTATED";
 }
 
 // One row per status change on a claim: who, how, when, and whether the verifier was credential-approved at the time.

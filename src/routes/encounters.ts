@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireActor } from "../middleware/auth.js";
 import type { EncounterService } from "../services/encounter/encounterService.js";
 import {
-  captureEncounterSchema, encounterDraftSchema, encounterReviewSchema,
+  captureEncounterSchema, encounterDraftSchema, encounterReviewSchema, selfEntrySchema,
 } from "../shared/encounterValidation.js";
 
 const params = z.object({ session: z.string().min(20).max(100), id: z.string().min(1).max(100) });
@@ -40,6 +40,14 @@ export function encounterRoutes(encounters: EncounterService): Router {
     const actor = requireActor(req, "HEALTH_WORKER");
     const { session, id } = params.parse(req.params);
     res.json(await encounters.get(session, actor.id, id));
+  });
+
+  // A patient recording a document they hold. One call, so a prescription with three
+  // medicines lands as one visit rather than three loose items.
+  r.post("/patients/me/entries", async (req, res) => {
+    const actor = requireActor(req, "PATIENT");
+    const userId = req.auth?.userId ?? actor.id;
+    res.status(201).json(await encounters.selfRecord(actor.id, userId, selfEntrySchema.parse(req.body)));
   });
 
   r.get("/patients/me/encounters/:id", async (req, res) => {

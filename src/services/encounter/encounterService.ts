@@ -2,7 +2,7 @@ import type { EncounterRepository } from "../../database/encounterRepository.js"
 import type { Repositories } from "../../database/repositories.js";
 import type { Encounter } from "../../shared/encounterTypes.js";
 import type {
-  CaptureEncounterInput, EncounterDraftInput, EncounterReviewInput,
+  CaptureEncounterInput, EncounterDraftInput, EncounterReviewInput, SelfEntryInput,
 } from "../../shared/encounterValidation.js";
 import type { AccessSession, AuditType, ClinicalClaim, Evidence } from "../../shared/types.js";
 import { AppError } from "../../utils/errors.js";
@@ -174,6 +174,88 @@ export class EncounterService {
   }
 
   /** The patient's own provenance view: what was originally said behind one of their claims. */
+  /**
+   * A patient recording a document they already hold: an old lab report, a prescription,
+   * a discharge summary. Stored as an encounter so it lands in the visit view the app
+   * already has, which means the capture needs no new reading screen and the note runs
+   * through the same explanation templates a worker's note does.
+   *
+   * Three deliberate differences from a worker's encounter:
+   *
+   * - It is REVIEWED on arrival. A worker's draft needs review because a model wrote it
+   *   and a second pair of eyes must confirm. A patient confirming their own entry on the
+   *   device IS that step, and encounterForPatient only returns reviewed encounters.
+   * - Claims are SELF_REPORTED, not UNVERIFIED. The patient is asserting these, which is
+   *   a different thing from nobody having checked them.
+   * - `source` stays "Patient". The facility printed on the paper goes on the evidence as
+   *   `origin`, never into `source`, because a hospital named on a document the patient
+   *   uploaded has not vouched for anything. Promotion to EVIDENCE_BACKED stays where it
+   *   was: a health worker looking at the document and agreeing.
+   */
+  async selfRecord(patientId: string, userId: string, input: SelfEntryInput) {
+    const patient = await this.deps.repos.patients.findById(patientId);
+    if (!patient) throw new AppError(404, "PATIENT_NOT_FOUND", "Patient record not found.");
+
+    const at = this.iso();
+    const encounterId = newId("enc");
+    const createdClaimIds: string[] = [];
+
+    for (const item of input.items) {
+      const claimId = newId("clm");
+      const evidence: Evidence = {
+        id: newId("evi"),
+        patientId,
+        claimId,
+        kind: input.evidenceKind,
+        description: item.excerpt && item.excerpt.length > 0 ? item.excerpt : input.note.slice(0, 500),
+        addedByUserId: userId,
+        addedByName: patient.fullName,
+        createdAt: at,
+        captureMethod: input.textSource,
+        ...(input.origin ? { origin: input.origin } : {}),
+        ...(input.imageHash ? { imageHash: input.imageHash } : {}),
+      };
+      const claim: ClinicalClaim = {
+        id: claimId,
+        patientId,
+        category: item.category,
+        value: item.value,
+        status: "SELF_REPORTED",
+        source: "Patient",
+        lastConfirmedAt: at,
+        evidenceId: evidence.id,
+        encounterId,
+      };
+      await this.deps.repos.records.add(claim);
+      await this.deps.repos.evidence.add(evidence);
+      createdClaimIds.push(claimId);
+    }
+
+    const encounter: Encounter = {
+      id: encounterId,
+      patientId,
+      authoredBy: "PATIENT",
+      // The worker* fields carry the patient's own identity here; authoredBy is the
+      // discriminator, so one encounter shape serves both paths.
+      workerUserId: userId,
+      workerName: patient.fullName,
+      workerFacility: null,
+      captureMethod: input.captureMethod,
+      rawInput: input.note,
+      draftSource: null,
+      draft: [],
+      status: "REVIEWED",
+      createdAt: at,
+      reviewedAt: at,
+      createdClaimIds,
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.imageHash ? { imageHash: input.imageHash } : {}),
+    };
+    await this.deps.encounters.create(encounter);
+    await this.audit(encounter, "ENCOUNTER_RECORDED", [...new Set(input.items.map((i) => i.category))]);
+    return encounter;
+  }
+
   async originFor(patientId: string, claimId: string) {
     const claim = await this.deps.repos.records.findById(claimId);
     if (!claim || claim.patientId !== patientId) {
@@ -200,6 +282,11 @@ export class EncounterService {
       recordedByFacility: found.workerFacility,
       recordedAt: found.reviewedAt ?? found.createdAt,
       status: found.status,
+      /** Lets the screen say "Added by you from a document" rather than naming a recorder. */
+      authoredBy: found.authoredBy ?? "WORKER",
+      captureMethod: found.captureMethod,
+      ...(found.origin ? { origin: found.origin } : {}),
+      ...(found.imageHash ? { imageHash: found.imageHash } : {}),
     };
   }
 }

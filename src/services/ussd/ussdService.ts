@@ -4,7 +4,7 @@ import type { User, UserRepository } from "../../auth/userRepository.js";
 import type { Repositories } from "../../database/repositories.js";
 import { normalizePhone } from "../../shared/phone.js";
 import { isWeakPin, type UssdRequest } from "../../shared/ussd.js";
-import type { EmergencyProfile } from "../../shared/types.js";
+import type { AccessScope, ClinicalClaim, EmergencyProfile } from "../../shared/types.js";
 import { AppError } from "../../utils/errors.js";
 import { newId } from "../../utils/ids.js";
 
@@ -12,8 +12,10 @@ const MAX_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
 /** Matches the cost used for account passwords elsewhere in this codebase. */
 const BCRYPT_COST = 10;
-/** A single USSD page on most handsets. Longer replies get cut off by the network, not by us. */
-const MAX_LIST_ITEMS = 3;
+/** A single USSD page is about 182 characters, so a page shows few items and offers More. */
+const PAGE_SIZE = 3;
+/** Used where a line has to summarise a list rather than page through it. */
+const MAX_INLINE_ITEMS = 3;
 
 export interface UssdReply {
   /** true sends END (the session closes), false sends CON (the network waits for more input). */
@@ -24,14 +26,74 @@ export interface UssdReply {
 const con = (message: string): UssdReply => ({ done: false, message });
 const end = (message: string): UssdReply => ({ done: true, message });
 
-const MENU = ["MedRekk", "1. My emergency card", "2. My MedRekk Code", "0. Exit"].join("\n");
+/**
+ * The first choice decides who is asking, because that decides what may be read.
+ * Branch 1 is the patient on their own SIM behind their own PIN, and shows their record.
+ * Branch 2 is somebody else holding a MedRekk Code, and shows the emergency card only.
+ */
+const TOP_MENU = ["MedRekk", "1. My record", "2. Emergency lookup"].join("\n");
+
+const RECORD_MENU = [
+  "MedRekk",
+  "1. Medicines",
+  "2. Allergies",
+  "3. Test results",
+  "4. Past conditions",
+  "5. Recent visits",
+  "6. Emergency card",
+  "7. My code",
+].join("\n");
+
+const SHORT_LABEL: Record<AccessScope, string> = {
+  ALLERGIES: "Allergies",
+  CURRENT_MEDICATIONS: "Medicines",
+  RECENT_ENCOUNTERS: "Notes",
+  PAST_MEDICAL_HISTORY: "History",
+  LAB_RESULTS: "Tests",
+  REFERRALS: "Referrals",
+  EMERGENCY_INFORMATION: "Emergency",
+};
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Deterministic and short, rather than depending on the server's locale. */
+function shortDate(iso: string | undefined): string {
+  if (!iso) return "date not recorded";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "date not recorded";
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
 
 /** Shows the first few entries and says how many are left, rather than silently dropping any. */
-function list(label: string, values: string[]): string | null {
+function inlineList(label: string, values: string[]): string | null {
   if (values.length === 0) return null;
-  const shown = values.slice(0, MAX_LIST_ITEMS).join(", ");
-  const rest = values.length - MAX_LIST_ITEMS;
+  const shown = values.slice(0, MAX_INLINE_ITEMS).join(", ");
+  const rest = values.length - MAX_INLINE_ITEMS;
   return rest > 0 ? `${label}: ${shown} (+${rest} more)` : `${label}: ${shown}`;
+}
+
+/**
+ * Reads a navigation tail. Each "0" is a More press, so the page number is the count of
+ * leading zeros and the token after them, if any, is the selection on that page.
+ */
+function readPage(tail: string[]): { page: number; choice?: string } {
+  let page = 0;
+  let i = 0;
+  while (tail[i] === "0") {
+    page += 1;
+    i += 1;
+  }
+  return { page, choice: tail[i] };
+}
+
+const newestFirst = (a: ClinicalClaim, b: ClinicalClaim): number =>
+  (b.lastConfirmedAt ?? "").localeCompare(a.lastConfirmedAt ?? "");
+
+interface Visit {
+  encounterId: string;
+  at?: string;
+  source: string;
+  claims: ClinicalClaim[];
 }
 
 export class UssdService {
@@ -52,23 +114,63 @@ export class UssdService {
   /**
    * One step of a USSD session.
    *
-   * The phone number only says which account is being asked about; the PIN is what
+   * A dialling number says which account is being asked about; the PIN is what
    * authenticates, because a SIM can be swapped or a handset borrowed. A PIN can only be
    * set from the signed-in app, never over USSD — otherwise whoever is holding the phone
    * could claim the account.
    *
-   * Only the emergency card and the MedRekk Code are readable here. USSD text crosses the
-   * aggregator and the mobile network in the clear and the handset screen is visible to
-   * anyone nearby, so the full record stays behind the app's approval flow.
+   * A patient reading their own record sees all of it, within what a handset can show.
+   * Approval protects a record from other people, not from its owner. What a dialled code
+   * cannot carry is the explanation layer, which runs to paragraphs; USSD shows what was
+   * recorded. The transit is unencrypted and the screen is visible to bystanders, which
+   * the app says plainly on its USSD screen.
    */
   async handle(req: UssdRequest): Promise<UssdReply> {
+    const steps = req.text.length === 0 ? [] : req.text.split("*");
+    if (steps.length === 0) return con(TOP_MENU);
+
+    const branch = steps[0];
+    if (branch === "2") return await this.emergencyLookup(req, steps.slice(1));
+    if (branch === "1") return await this.ownRecord(req, steps.slice(1));
+    return con(`Not one of the options.\n${TOP_MENU}`);
+  }
+
+  // ---- Branch 2: somebody else, by MedRekk Code, no PIN ----
+
+  /**
+   * Deliberately open, exactly like the web emergency page: a responder will not have the
+   * patient's PIN and may not have a MedRekk account at all. It shows the emergency card
+   * and nothing else, and the dialling number goes into the patient's audit log.
+   */
+  private async emergencyLookup(req: UssdRequest, tail: string[]): Promise<UssdReply> {
+    if (tail.length === 0) return con("Enter the patient's MedRekk Code:");
+
+    const code = (tail[0] ?? "").trim().toUpperCase();
+    const patient = await this.deps.repos.patients.findByCode(code);
+    const profile = patient ? await this.deps.repos.emergency.profileFor(patient.id) : undefined;
+    if (!patient || !profile) return end("No emergency card found for that code. Check it and try again.");
+
+    await this.deps.repos.audit.append({
+      id: newId("aud"),
+      patientId: patient.id,
+      type: "EMERGENCY_ACCESSED",
+      accessType: "EMERGENCY",
+      occurredAt: this.iso(),
+      requesterIdentifier: `Phone ${normalizePhone(req.phoneNumber) ?? req.phoneNumber}`,
+      reason: "Emergency lookup by dialled code",
+      informationViewed: ["EMERGENCY_PROFILE"],
+    });
+
+    return end(this.emergencyLines(patient.fullName, profile));
+  }
+
+  // ---- Branch 1: the patient, on their own SIM, behind their own PIN ----
+
+  private async ownRecord(req: UssdRequest, tail: string[]): Promise<UssdReply> {
     const phone = normalizePhone(req.phoneNumber);
     if (!phone) return end("We could not read that phone number.");
 
     const user = await this.deps.users.findByPhone(phone);
-    // Saying which of these it is tells the caller what to do next, at the cost of
-    // revealing whether a number has an account. USSD_SHARED_SECRET is what keeps that
-    // from being an open enumeration endpoint; see routes/ussd.ts.
     if (!user || !user.patientId) {
       return end("This number is not registered with MedRekk. Sign up in the app first.");
     }
@@ -89,29 +191,158 @@ export class UssdService {
       await this.deps.users.update(active);
     }
 
-    const steps = req.text.length === 0 ? [] : req.text.split("*");
-    if (steps.length === 0) return con("MedRekk\nEnter your 4-digit PIN:");
+    if (tail.length === 0) return con("Enter your 4-digit PIN:");
 
-    const entered = steps[0] ?? "";
-    const ok = await bcrypt.compare(entered, active.ussdPinHash!);
+    const ok = await bcrypt.compare(tail[0] ?? "", active.ussdPinHash!);
     if (!ok) return await this.recordFailure(active);
     await this.clearFailures(active);
 
-    // The last step is the current answer: after a re-prompt the text is "pin*bad*choice".
-    const choice = steps.length >= 2 ? steps[steps.length - 1] : undefined;
-    if (choice === undefined) return con(MENU);
+    const rest = tail.slice(1);
+    if (rest.length === 0) return con(RECORD_MENU);
+
+    // Narrowed to a string by the guard above; `active` only differs in its PIN fields.
+    const patientId = user.patientId;
+    const choice = rest[0];
+    const nav = rest.slice(1);
 
     switch (choice) {
       case "1":
-        return end(await this.emergencySummary(active));
+        return await this.categoryPage(patientId, "CURRENT_MEDICATIONS", nav);
       case "2":
+        return await this.categoryPage(patientId, "ALLERGIES", nav);
+      case "3":
+        return await this.categoryPage(patientId, "LAB_RESULTS", nav);
+      case "4":
+        return await this.categoryPage(patientId, "PAST_MEDICAL_HISTORY", nav);
+      case "5":
+        return await this.visits(patientId, nav);
+      case "6":
+        return end(await this.emergencyCard(active));
+      case "7":
         return end(await this.codeSummary(active));
-      case "0":
-        return end("Goodbye.");
       default:
-        return con(`Not one of the options.\n${MENU}`);
+        return con(`Not one of the options.\n${RECORD_MENU}`);
     }
   }
+
+  // ---- Reading the record ----
+
+  /** One page of a single category. Pages rather than truncating: a dropped medicine is a hazard. */
+  private async categoryPage(patientId: string, scope: AccessScope, nav: string[]): Promise<UssdReply> {
+    const { page } = readPage(nav);
+    const claims = (await this.deps.repos.records.allFor(patientId))
+      .filter((c) => c.category === scope)
+      .sort(newestFirst);
+
+    const label = SHORT_LABEL[scope];
+    if (claims.length === 0) return end(`Nothing recorded under ${label.toLowerCase()}.`);
+
+    const start = page * PAGE_SIZE;
+    if (start >= claims.length) return end(`No more ${label.toLowerCase()}.`);
+
+    const shown = claims.slice(start, start + PAGE_SIZE);
+    const more = claims.length > start + PAGE_SIZE;
+    await this.audit(patientId, [scope]);
+
+    const lines = [
+      `${label} (${start + 1}-${start + shown.length} of ${claims.length})`,
+      ...shown.map((c) => `${c.value} - ${shortDate(c.lastConfirmedAt)}`),
+    ];
+    if (more) lines.push("0. More");
+    return more ? con(lines.join("\n")) : end(lines.join("\n"));
+  }
+
+  /** Visits are claims that share an encounter, which is how the app groups them too. */
+  private async visits(patientId: string, nav: string[]): Promise<UssdReply> {
+    const { page, choice } = readPage(nav);
+    const claims = await this.deps.repos.records.allFor(patientId);
+
+    const byEncounter = new Map<string, Visit>();
+    for (const claim of claims.sort(newestFirst)) {
+      if (!claim.encounterId) continue;
+      const existing = byEncounter.get(claim.encounterId);
+      if (existing) {
+        existing.claims.push(claim);
+      } else {
+        byEncounter.set(claim.encounterId, {
+          encounterId: claim.encounterId,
+          at: claim.lastConfirmedAt,
+          source: claim.source,
+          claims: [claim],
+        });
+      }
+    }
+
+    const all = [...byEncounter.values()];
+    if (all.length === 0) {
+      return end("No visits recorded yet. Items you entered yourself are under the other options.");
+    }
+
+    const start = page * PAGE_SIZE;
+    const shown = all.slice(start, start + PAGE_SIZE);
+    if (shown.length === 0) return end("No more visits.");
+
+    if (choice !== undefined) {
+      const picked = shown[Number(choice) - 1];
+      if (!picked) return con(`Not one of the options.\n${this.visitList(shown, start, all.length)}`);
+      return end(await this.visitDetail(patientId, picked));
+    }
+
+    return con(this.visitList(shown, start, all.length));
+  }
+
+  private visitList(shown: Visit[], start: number, total: number): string {
+    const lines = [
+      `Visits (${start + 1}-${start + shown.length} of ${total})`,
+      ...shown.map((v, i) => `${i + 1}. ${shortDate(v.at)} - ${v.claims.length} item${v.claims.length === 1 ? "" : "s"}`),
+    ];
+    if (total > start + shown.length) lines.push("0. More");
+    return lines.join("\n");
+  }
+
+  private async visitDetail(patientId: string, visit: Visit): Promise<UssdReply["message"]> {
+    const scopes = [...new Set(visit.claims.map((c) => c.category))];
+    await this.audit(patientId, scopes);
+
+    const grouped = scopes
+      .map((scope) => inlineList(SHORT_LABEL[scope], visit.claims.filter((c) => c.category === scope).map((c) => c.value)))
+      .filter((line): line is string => line !== null);
+
+    return [`${shortDate(visit.at)}`, `Recorded by ${visit.source}`, ...grouped].join("\n");
+  }
+
+  private async emergencyCard(user: User): Promise<string> {
+    const patientId = user.patientId!;
+    const profile = await this.deps.repos.emergency.profileFor(patientId);
+    await this.audit(patientId, ["EMERGENCY_INFORMATION"]);
+    if (!profile) return "Nothing on your emergency card yet. Add it in the MedRekk app.";
+    return this.emergencyLines(user.fullName, profile);
+  }
+
+  private emergencyLines(name: string, profile: EmergencyProfile): string {
+    const contact = profile.emergencyContact;
+    const lines = [
+      `MedRekk — ${name}`,
+      profile.bloodGroup ? `Blood: ${profile.bloodGroup}` : null,
+      inlineList("Allergies", profile.criticalAllergies),
+      inlineList("Conditions", profile.criticalConditions),
+      inlineList("Medicines", profile.criticalMedications),
+      contact ? `Contact: ${contact.name} ${contact.phone}` : null,
+    ].filter((line): line is string => line !== null);
+
+    if (lines.length === 1) return "Nothing on this emergency card yet.";
+    return lines.join("\n");
+  }
+
+  private async codeSummary(user: User): Promise<string> {
+    const patientId = user.patientId!;
+    const patient = await this.deps.repos.patients.findById(patientId);
+    if (!patient) return "We could not find your record. Please try the app.";
+    await this.audit(patientId, ["MEDREKK_CODE"]);
+    return `Your MedRekk Code is ${patient.medrekkCode}. Give it to a clinician so they can request access.`;
+  }
+
+  // ---- PIN attempts ----
 
   private async recordFailure(user: User): Promise<UssdReply> {
     const failures = (user.ussdPinFailures ?? 0) + 1;
@@ -141,41 +372,6 @@ export class UssdService {
       requesterIdentifier: "You, by USSD",
       informationViewed: viewed,
     });
-  }
-
-  private async emergencySummary(user: User): Promise<string> {
-    const patientId = user.patientId!;
-    const profile = await this.deps.repos.emergency.profileFor(patientId);
-    await this.audit(patientId, ["EMERGENCY_PROFILE"]);
-
-    if (!profile) return "Nothing on your emergency card yet. Add it in the MedRekk app.";
-
-    const lines = [
-      `MedRekk — ${user.fullName}`,
-      profile.bloodGroup ? `Blood: ${profile.bloodGroup}` : null,
-      list("Allergies", profile.criticalAllergies),
-      list("Conditions", profile.criticalConditions),
-      list("Medicines", profile.criticalMedications),
-      this.contactLine(profile),
-    ].filter((line): line is string => line !== null);
-
-    if (lines.length === 1) {
-      return "Nothing on your emergency card yet. Add it in the MedRekk app.";
-    }
-    return lines.join("\n");
-  }
-
-  private contactLine(profile: EmergencyProfile): string | null {
-    const contact = profile.emergencyContact;
-    return contact ? `Contact: ${contact.name} ${contact.phone}` : null;
-  }
-
-  private async codeSummary(user: User): Promise<string> {
-    const patientId = user.patientId!;
-    const patient = await this.deps.repos.patients.findById(patientId);
-    if (!patient) return "We could not find your record. Please try the app.";
-    await this.audit(patientId, ["MEDREKK_CODE"]);
-    return `Your MedRekk Code is ${patient.medrekkCode}. Give it to a clinician so they can request access.`;
   }
 
   // ---- PIN management, from the signed-in app only ----

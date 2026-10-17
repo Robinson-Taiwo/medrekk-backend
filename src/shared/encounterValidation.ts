@@ -2,6 +2,12 @@ import { z } from "zod";
 import { CAPTURE_METHODS, CLAIM_CATEGORIES } from "./encounterTypes.js";
 
 export const captureEncounterSchema = z.object({
+  /**
+   * The client may supply the id. An encounter captured with no connection is given its
+   * identity on the handset, so that when it finally syncs it is the same encounter rather
+   * than a second copy — and a replayed upload is recognised instead of duplicated.
+   */
+  id: z.string().trim().regex(/^enc_[A-Za-z0-9-]{8,64}$/).optional(),
   rawInput: z.string().trim().min(3).max(5000),
   captureMethod: z.enum(CAPTURE_METHODS).default("TEXT"),
 });

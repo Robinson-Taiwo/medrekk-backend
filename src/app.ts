@@ -31,6 +31,7 @@ import { NoopCloudAdapter, type CloudAdapter } from "./services/cloud/rumpty.js"
 import { EmergencyService } from "./services/emergency/emergencyService.js";
 import { PatientService } from "./services/patient/patientService.js";
 import { SyncService } from "./services/sync/syncService.js";
+import { OperationApplier } from "./services/sync/operationApplier.js";
 import { UssdService } from "./services/ussd/ussdService.js";
 import { VerificationService } from "./services/verification/verificationService.js";
 import { AppError } from "./utils/errors.js";
@@ -153,7 +154,7 @@ export function buildApp(opts: AppOptions): Express {
   app.use(verificationRoutes(verificationService));
   app.use(adminRoutes(adminService));
   app.use(emergencyRoutes(new EmergencyService({ repos, now })));
-  app.use(syncRoutes(new SyncService({ repos, cloud })));
+  app.use(syncRoutes(new SyncService({ repos, cloud, apply: new OperationApplier({ encounters: encounterService }) })));
   app.use(ussdRoutes(ussdService, opts.config.USSD_SHARED_SECRET));
 
   app.use((_req, res) => { res.status(404).json({ error: { code: "NOT_FOUND", message: "Route not found." } }); });

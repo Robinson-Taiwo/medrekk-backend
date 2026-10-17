@@ -106,10 +106,47 @@ describe("sync", () => {
     operationId: "op-12345678", entityType: "encounters", entityId: "enc_1", operation: "CREATE",
     payload: { chiefComplaint: "cough" }, createdAt: "2026-10-06T10:00:00Z",
   };
+  /**
+   * A queued operation now has to be one the server can really apply. This used to push
+   * `{ chiefComplaint: "cough" }` at an encounter that did not exist and still get SYNCED,
+   * because nothing was applied — the answer was true about the queue and false about the
+   * record. Idempotency is only worth asserting over work that actually happens.
+   */
+  async function realOperation(app: ReturnType<typeof makeApp>) {
+    const { body } = await request(app).post("/access/lookup").send(lookup).expect(201);
+    // Recording an encounter needs RECENT_ENCOUNTERS. A queued operation gets no more
+    // authority than a live request would, so the grant has to actually cover it.
+    await request(app)
+      .post(`/access/${body.session}/request`)
+      .set(worker)
+      .send({ ...ask, scopes: ["RECENT_ENCOUNTERS"] })
+      .expect(202);
+    const list = await request(app).get("/patients/me/access-requests").set(patient).expect(200);
+    await request(app)
+      .post(`/patients/me/access-requests/${list.body[0].id as string}/decision`)
+      .set(patient)
+      .send({ decision: "APPROVE" })
+      .expect(200);
+    return {
+      operationId: "op-12345678",
+      entityType: "encounters",
+      entityId: "enc_sync-idempotency-0001",
+      operation: "CREATE",
+      payload: {
+        accessToken: body.session as string,
+        rawInput: "Patient reports a cough that started three days ago.",
+        captureMethod: "TEXT",
+        items: [],
+      },
+      createdAt: "2026-10-06T10:00:00Z",
+    };
+  }
+
   it("is idempotent per operationId", async () => {
     const app = makeApp();
-    const a = await request(app).post("/sync/push").set(worker).send({ operations: [op] }).expect(200);
-    const b = await request(app).post("/sync/push").set(worker).send({ operations: [op] }).expect(200);
+    const real = await realOperation(app);
+    const a = await request(app).post("/sync/push").set(worker).send({ operations: [real] }).expect(200);
+    const b = await request(app).post("/sync/push").set(worker).send({ operations: [real] }).expect(200);
     expect(a.body.results[0].status).toBe("SYNCED");
     expect(b.body.results[0].status).toBe("DUPLICATE");
   });

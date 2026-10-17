@@ -66,8 +66,21 @@ export class EncounterService {
 
   async capture(token: string, workerUserId: string, input: CaptureEncounterInput) {
     const session = await this.session(token, workerUserId);
+
+    // A capture that arrives twice — a retried upload, a queue replayed after a crash — must
+    // not become two encounters. The handset's id is what makes that detectable.
+    if (input.id) {
+      const existing = await this.deps.encounters.findById(input.id);
+      if (existing) {
+        if (existing.sessionId !== session.id) {
+          throw new AppError(409, "ENCOUNTER_ID_TAKEN", "That encounter id belongs to another session.");
+        }
+        return existing;
+      }
+    }
+
     const encounter: Encounter = {
-      id: newId("enc"),
+      id: input.id ?? newId("enc"),
       patientId: session.patientId,
       sessionId: session.id,
       workerUserId,

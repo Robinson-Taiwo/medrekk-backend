@@ -11,6 +11,7 @@ import type { ReferralRepository } from "./database/referralRepository.js";
 import { createMemoryRepositories, emptyStore, seedDemoData } from "./database/memory.js";
 import type { Repositories } from "./database/repositories.js";
 import { createAttachAuth } from "./middleware/auth.js";
+import { ExpoPushSender, NoopPushSender, type PushSender } from "./services/notify/pushService.js";
 import { accessRoutes } from "./routes/access.js";
 import { adminRoutes } from "./routes/admin.js";
 import { createAuthRouter } from "./routes/auth.js";
@@ -43,6 +44,7 @@ export interface AppOptions {
   cloud?: CloudAdapter;
   users?: UserRepository;
   documents?: CredentialDocumentRepository;
+  push?: PushSender;
   referrals?: ReferralRepository;
   encounters?: EncounterRepository;
 }
@@ -97,7 +99,13 @@ export function buildApp(opts: AppOptions): Express {
     .map((e) => e.trim().toLowerCase())
     .filter((e) => e.length > 0);
 
-  const accessService = new AccessService({ repos, now });
+  /*
+   * Push is opt-in: with EXPO_PUSH_ENABLED unset the sender does nothing and every flow
+   * behaves exactly as it did. Notifications are a courtesy on top of the consent model, not
+   * part of its correctness.
+   */
+  const push: PushSender = opts.push ?? (opts.config.EXPO_PUSH_ENABLED ? new ExpoPushSender() : new NoopPushSender());
+  const accessService = new AccessService({ repos, now, users, push });
   const referralService = new ReferralService({ repos, referrals: opts.referrals ?? createMemoryReferralRepository(), now });
   const encounterService = new EncounterService({
     repos,

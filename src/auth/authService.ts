@@ -159,6 +159,32 @@ export class AuthService {
     return this.issue(updated);
   }
 
+  /**
+   * Remembering a handset so the server can reach it.
+   *
+   * Kept as a set per account rather than one token: a clinician may carry a work phone and a
+   * personal one, and a patient who reinstalls gets a new token while the old one lingers.
+   * Expo drops tokens that no longer resolve, so a stale entry costs nothing.
+   */
+  async registerPushToken(userId: string, token: string): Promise<void> {
+    const user = await this.users.findById(userId);
+    if (!user) throw new AppError(404, "USER_NOT_FOUND", "Account not found.");
+    const tokens = new Set(user.pushTokens ?? []);
+    if (tokens.has(token)) return;
+    tokens.add(token);
+    await this.users.update({ ...user, pushTokens: [...tokens] });
+  }
+
+  /**
+   * Forgetting one, on sign-out. Without this the next notification for that account would
+   * land on a handset somebody else is now holding.
+   */
+  async forgetPushToken(userId: string, token: string): Promise<void> {
+    const user = await this.users.findById(userId);
+    if (!user?.pushTokens) return;
+    await this.users.update({ ...user, pushTokens: user.pushTokens.filter((t) => t !== token) });
+  }
+
   async login(input: LoginInput): Promise<AuthResponse> {
     const user = await this.users.findByEmail(input.email);
     const ok = await bcrypt.compare(input.password, user?.passwordHash ?? DUMMY_HASH);

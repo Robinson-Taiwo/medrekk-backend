@@ -4,6 +4,8 @@ import type {
 import type { AccessDecisionInput, AccessLookupInput, AccessRequestInput } from "../../shared/validation.js";
 import type { Repositories } from "../../database/repositories.js";
 import { AppError } from "../../utils/errors.js";
+import type { UserRepository } from "../../auth/userRepository.js";
+import type { PushMessage, PushSender } from "../notify/pushService.js";
 import { hashToken, newAccessToken, newId, normalizeName } from "../../utils/ids.js";
 
 const SESSION_LIFETIME_MS = 30 * 60 * 1000;
@@ -11,6 +13,9 @@ const SESSION_LIFETIME_MS = 30 * 60 * 1000;
 export interface AccessDeps {
   repos: Repositories;
   now: () => Date;
+  /** Optional: without them, the flow works exactly as before and nobody is notified. */
+  users?: UserRepository;
+  push?: PushSender;
 }
 
 export class AccessService {
@@ -33,6 +38,34 @@ export class AccessService {
       reason: session.requester?.reason,
       ...extra,
     });
+  }
+
+  /**
+   * Reaching a person rather than a screen.
+   *
+   * Everything here is best effort and never awaited into the caller's outcome in a way that
+   * could fail it: an access request that succeeded must not report failure because a
+   * notification did not go out.
+   */
+  private async notify(userId: string | undefined, message: PushMessage): Promise<void> {
+    if (!userId || !this.deps.users || !this.deps.push) return;
+    try {
+      const user = await this.deps.users.findById(userId);
+      const tokens = user?.pushTokens ?? [];
+      if (tokens.length > 0) await this.deps.push.send(tokens, message);
+    } catch {
+      // Logged by the sender. Not the caller's problem.
+    }
+  }
+
+  private async notifyPatient(patientId: string, message: PushMessage): Promise<void> {
+    if (!this.deps.users) return;
+    try {
+      const user = await this.deps.users.findByPatientId(patientId);
+      await this.notify(user?.id, message);
+    } catch {
+      // As above.
+    }
   }
 
   /** Code + name -> opaque session token. Same generic error for wrong code or wrong name (no enumeration). */
@@ -109,6 +142,14 @@ export class AccessService {
     };
     await this.repos.sessions.update(updated);
     await this.audit(updated, "ACCESS_REQUESTED", { informationViewed: updated.requestedScopes });
+
+    // The one notification the consent model actually depends on: a request is only open for
+    // a few minutes, and before this the patient found out by happening to open the app.
+    await this.notifyPatient(updated.patientId, {
+      title: "Someone wants to read your record",
+      body: `${input.requesterName}${input.requesterFacility ? ` · ${input.requesterFacility}` : ""} — ${input.reason}`,
+      data: { kind: "ACCESS_REQUEST", sessionId: updated.id },
+    });
     return { status: updated.status };
   }
 
@@ -247,6 +288,11 @@ export class AccessService {
       const denied: AccessSession = { ...found, status: "DENIED", decidedAt: this.iso() };
       await this.repos.sessions.update(denied);
       await this.audit(denied, "ACCESS_DENIED");
+      await this.notify(denied.requesterUserId, {
+        title: "Access declined",
+        body: "The patient did not approve your request. Nothing was shared.",
+        data: { kind: "ACCESS_DENIED", sessionId: denied.id },
+      });
       return { status: denied.status };
     }
     const approvedScopes = input.approvedScopes ?? found.requestedScopes;
@@ -260,6 +306,11 @@ export class AccessService {
     };
     await this.repos.sessions.update(approved);
     await this.audit(approved, "ACCESS_APPROVED", { informationViewed: approved.approvedScopes });
+    await this.notify(approved.requesterUserId, {
+      title: "Access approved",
+      body: `You can read this record for ${minutes} minutes.`,
+      data: { kind: "ACCESS_APPROVED", sessionId: approved.id },
+    });
     return { status: approved.status, grantedUntil: approved.grantedUntil };
   }
 
@@ -296,6 +347,12 @@ export class AccessService {
     const revoked: AccessSession = { ...found, status: "REVOKED", revokedAt: this.iso() };
     await this.repos.sessions.update(revoked);
     await this.audit(revoked, "ACCESS_REVOKED", { informationViewed: revoked.approvedScopes });
+    // Told rather than left to discover it on the next tap, which would read as a fault.
+    await this.notify(revoked.requesterUserId, {
+      title: "Access ended",
+      body: "The patient ended your access to their record.",
+      data: { kind: "ACCESS_REVOKED", sessionId: revoked.id },
+    });
     return { status: revoked.status, revokedAt: revoked.revokedAt };
   }
 

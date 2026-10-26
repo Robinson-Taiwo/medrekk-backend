@@ -9,7 +9,8 @@ const config: AppConfig = {
   AUTH_MODE: "dev",
   JWT_SECRET: "x".repeat(32),
   SEED_DEMO_DATA: true,
-  CORS_ORIGIN: "http://localhost:3000", // keep your existing values
+  CORS_ORIGIN: "http://localhost:3000",
+  EXPO_PUSH_ENABLED: false, // keep your existing values
 };
 const patient = { "x-actor-id": "pat_demo_amaka", "x-actor-role": "PATIENT" };
 const lookup = { medrekkCode: "mrk-82941", patientName: "  amaka  OKAFOR " };

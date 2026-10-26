@@ -54,6 +54,10 @@ export function createPostgresUserRepository(db: Db): UserRepository {
         user.role,
         JSON.stringify(user),
       ]),
+    findByPatientId: async (patientId) => {
+      const res = await db.query<DataRow<User>>("SELECT data FROM users WHERE data->>'patientId' = $1", [patientId]);
+      return res.rows[0]?.data ?? null;
+    },
     listByRole: async (role) => {
       const res = await db.query<DataRow<User>>("SELECT data FROM users WHERE role = $1 ORDER BY data->>'createdAt'", [role]);
       return res.rows.map((r) => r.data);

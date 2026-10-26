@@ -12,6 +12,8 @@ export interface User {
   credentialStatus: CredentialStatus | null
   /** HEALTH_WORKER only. What they say their registration is, for an approver to check. */
   licence?: LicenceClaim
+  /** Expo push tokens, one per handset this account is signed in on. */
+  pushTokens?: string[]
   phone?: string
   /** bcrypt hash of the 4-digit USSD PIN. Unset means USSD is off for this account. */
   ussdPinHash?: string
@@ -31,6 +33,8 @@ export interface CredentialDocumentRepository {
 export interface UserRepository {
   findByEmail(email: string): Promise<User | null>
   findByPhone(phone: string): Promise<User | null>
+  /** The account that holds a given patient record, for notifying them about it. */
+  findByPatientId(patientId: string): Promise<User | null>
   findById(id: string): Promise<User | null>
   create(user: User): Promise<void>
   update(user: User): Promise<void>
@@ -45,6 +49,11 @@ export class InMemoryUserRepository implements UserRepository {
   async findByEmail(email: string): Promise<User | null> {
     const id = this.idByEmail.get(email)
     return id ? (this.byId.get(id) ?? null) : null
+  }
+
+  async findByPatientId(patientId: string): Promise<User | null> {
+    for (const user of this.byId.values()) if (user.patientId === patientId) return user
+    return null
   }
 
   async findByPhone(phone: string): Promise<User | null> {

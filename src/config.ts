@@ -27,6 +27,9 @@ const envSchema = z
     // Secret the USSD aggregator must send in x-ussd-secret. Left unset, /ussd is open,
     // which is fine for a local simulator and not for production.
     USSD_SHARED_SECRET: z.string().min(16).optional(),
+    // "true" sends push notifications through Expo. Left unset, the app works unchanged and
+    // nothing is sent — the consent flow never depended on a notification arriving.
+    EXPO_PUSH_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
   })
   .refine((e) => !(e.NODE_ENV === "production" && e.AUTH_MODE === "dev"), {
     message: "AUTH_MODE=dev is not allowed in production",

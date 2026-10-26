@@ -54,6 +54,12 @@ export const CredentialSubmissionSchema = z.object({
 })
 export type CredentialSubmissionInput = z.infer<typeof CredentialSubmissionSchema>
 
+/** One handset. Expo mints these, and the prefix is what the sender filters on. */
+export const PushTokenSchema = z.object({
+  token: z.string().trim().min(10).max(200),
+})
+export type PushTokenInput = z.infer<typeof PushTokenSchema>
+
 export const LoginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1).max(128),

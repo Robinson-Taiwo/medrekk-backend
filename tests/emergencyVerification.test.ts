@@ -10,6 +10,7 @@ const config: AppConfig = {
   JWT_SECRET: "x".repeat(32),
   SEED_DEMO_DATA: true,
   CORS_ORIGIN: "http://localhost:3000",
+  EXPO_PUSH_ENABLED: false,
 };
 
 type App = ReturnType<typeof buildApp>;

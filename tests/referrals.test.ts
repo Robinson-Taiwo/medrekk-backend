@@ -10,6 +10,7 @@ const config: AppConfig = {
   JWT_SECRET: "x".repeat(32),
   SEED_DEMO_DATA: true,
   CORS_ORIGIN: "http://localhost:3000",
+  EXPO_PUSH_ENABLED: false,
 };
 
 let clock = new Date("2026-10-07T12:00:00Z");

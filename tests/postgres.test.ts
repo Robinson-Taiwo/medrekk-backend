@@ -25,6 +25,7 @@ const config: AppConfig = {
   JWT_SECRET: "x".repeat(32),
   SEED_DEMO_DATA: false,
   CORS_ORIGIN: "http://localhost:3000",
+  EXPO_PUSH_ENABLED: false,
 };
 
 suite("postgres adapter", () => {

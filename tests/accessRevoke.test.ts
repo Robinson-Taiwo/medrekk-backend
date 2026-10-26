@@ -10,6 +10,7 @@ const config: AppConfig = {
   JWT_SECRET: "x".repeat(32),
   SEED_DEMO_DATA: true,
   CORS_ORIGIN: "http://localhost:3000",
+  EXPO_PUSH_ENABLED: false,
 };
 const patient = { "x-actor-id": "pat_demo_amaka", "x-actor-role": "PATIENT" };
 const other = { "x-actor-id": "pat_other", "x-actor-role": "PATIENT" };

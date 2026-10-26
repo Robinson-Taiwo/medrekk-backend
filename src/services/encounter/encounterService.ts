@@ -283,6 +283,39 @@ export class EncounterService {
    * from the note is on their record, and a half-written note would mislead rather than inform.
    * The draft, the review decisions and the worker's user id stay out of the response.
    */
+  /**
+   * Every document on the record, newest first.
+   *
+   * The record screen used to build its visit rows out of claims grouped by encounterId, which
+   * meant a document only existed on the timeline if something had been extracted from it. A
+   * scanned report with no nameable items simply vanished. Listing encounters directly makes the
+   * document the thing that is kept, and the claims what was found inside it.
+   */
+  async listForPatient(patientId: string) {
+    const all = await this.deps.encounters.listForPatient(patientId);
+    return all
+      .filter((e) => e.status === "REVIEWED")
+      .map((e) => ({
+        id: e.id,
+        authoredBy: e.authoredBy ?? "WORKER",
+        captureMethod: e.captureMethod,
+        recordedByName: e.workerName,
+        recordedByFacility: e.workerFacility,
+        recordedAt: e.reviewedAt ?? e.createdAt,
+        claimIds: e.createdClaimIds,
+        /** A one-line stand-in for the document, so the list needs no second request. */
+        preview: e.rawInput.replace(/\s+/g, " ").trim().slice(0, 140),
+        hasImage: e.imageHash !== undefined,
+        /*
+         * The fingerprint, not the picture. The image itself never leaves the handset, so this
+         * is how a device finds its own copy again — and how a second device learns there is one
+         * it does not hold.
+         */
+        ...(e.imageHash ? { imageHash: e.imageHash } : {}),
+        ...(e.origin ? { origin: e.origin } : {}),
+      }));
+  }
+
   async encounterForPatient(patientId: string, encounterId: string) {
     const found = await this.deps.encounters.findById(encounterId);
     if (!found || found.patientId !== patientId || found.status !== "REVIEWED") {

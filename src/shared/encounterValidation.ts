@@ -38,7 +38,12 @@ export const selfEntrySchema = z.object({
   note: z.string().trim().min(3).max(5000),
   captureMethod: z.enum(CAPTURE_METHODS).default("PHOTO"),
   evidenceKind: z.enum(PATIENT_EVIDENCE_KINDS).default("DOCUMENT"),
-  items: z.array(draftItemSchema).min(1).max(20),
+  /**
+   * What was pulled out of the note. Allowed to be empty: a discharge summary whose extraction
+   * found nothing nameable is still a document the patient wants kept, and refusing it would
+   * throw away the one copy they have in order to protect a list of tags.
+   */
+  items: z.array(draftItemSchema).max(20).default([]),
   origin: z
     .object({
       facility: z.string().trim().max(160).optional(),

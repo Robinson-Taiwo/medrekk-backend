@@ -50,6 +50,11 @@ export function encounterRoutes(encounters: EncounterService): Router {
     res.status(201).json(await encounters.selfRecord(actor.id, userId, selfEntrySchema.parse(req.body)));
   });
 
+  r.get("/patients/me/entries", async (req, res) => {
+    const actor = requireActor(req, "PATIENT");
+    res.json(await encounters.listForPatient(actor.id));
+  });
+
   r.get("/patients/me/encounters/:id", async (req, res) => {
     const actor = requireActor(req, "PATIENT");
     res.json(await encounters.encounterForPatient(actor.id, String(req.params.id)));

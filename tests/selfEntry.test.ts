@@ -135,9 +135,62 @@ describe("a patient recording a document they hold", () => {
     await request(app).post("/patients/me/entries").set(auth).send({ ...entry, imageHash: "nope" }).expect(400);
   });
 
-  it("requires at least one item, so an empty entry cannot be filed", async () => {
+  it("keeps a document even when nothing could be extracted from it", async () => {
     const { app, auth } = await patient();
-    await request(app).post("/patients/me/entries").set(auth).send({ ...entry, items: [] }).expect(400);
+    const created = await request(app)
+      .post("/patients/me/entries")
+      .set(auth)
+      .send({ ...entry, items: [] })
+      .expect(201);
+
+    // The note survives in full. This is the whole point: a discharge summary that the
+    // extractor made nothing of is still the only copy the patient has, and refusing it to
+    // protect a list of tags loses the document to save the index.
+    expect(created.body.rawInput).toBe(entry.note);
+    expect(created.body.createdClaimIds).toEqual([]);
+
+    const listed = await request(app).get("/patients/me/entries").set(auth).expect(200);
+    expect(listed.body).toHaveLength(1);
+    expect(listed.body[0].id).toBe(created.body.id);
+    expect(listed.body[0].claimIds).toEqual([]);
+  });
+
+  it("lists entries for the patient, newest first, with a preview of each", async () => {
+    const { app, auth } = await patient();
+    await request(app).post("/patients/me/entries").set(auth).send(entry).expect(201);
+    await request(app)
+      .post("/patients/me/entries")
+      .set(auth)
+      .send({ ...entry, note: "Second document, recorded after the first." })
+      .expect(201);
+
+    const listed = await request(app).get("/patients/me/entries").set(auth).expect(200);
+    expect(listed.body).toHaveLength(2);
+    expect(listed.body[0].preview).toContain("Second document");
+    expect(listed.body[0].authoredBy).toBe("PATIENT");
+  });
+
+  it("does not list another patient's entries", async () => {
+    // Both accounts on the SAME app, or each would get its own store and this would pass
+    // whether or not listForPatient filtered at all.
+    const { app, auth } = await patient();
+    await request(app).post("/patients/me/entries").set(auth).send(entry).expect(201);
+
+    const second = await request(app)
+      .post("/auth/register")
+      .send({
+        email: `bola-${Math.random().toString(36).slice(2)}@example.com`,
+        password: "password-123",
+        fullName: "Bola Eze",
+        role: "PATIENT",
+      })
+      .expect(201);
+
+    const listed = await request(app)
+      .get("/patients/me/entries")
+      .set({ Authorization: `Bearer ${second.body.token as string}` })
+      .expect(200);
+    expect(listed.body).toEqual([]);
   });
 
   it("shows in the patient's audit trail", async () => {

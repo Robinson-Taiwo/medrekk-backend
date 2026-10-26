@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireActor } from "../middleware/auth.js";
 import type { PatientService } from "../services/patient/patientService.js";
-import { emergencyProfileSchema, selfClaimSchema } from "../shared/validation.js";
+import { emergencyProfileSchema, patientEvidenceSchema, selfClaimSchema } from "../shared/validation.js";
 import { ProfileUpdateSchema } from "../shared/profile.js";
 
 export function patientRoutes(patients: PatientService): Router {
@@ -20,6 +20,21 @@ export function patientRoutes(patients: PatientService): Router {
     r.post("/patients/me/claims", async (req, res) => {
         const actor = requireActor(req, "PATIENT");
         res.status(201).json(await patients.addSelfClaim(actor.id, selfClaimSchema.parse(req.body)));
+    });
+
+    // A document the patient attaches to their own entry. It does not raise the entry's
+    // standing — only a clinician can do that — but it puts the paper in front of whoever
+    // reviews it next.
+    r.post("/patients/me/claims/:id/evidence", async (req, res) => {
+        const actor = requireActor(req, "PATIENT");
+        res.status(201).json(
+            await patients.addSelfEvidence(actor.id, String(req.params.id), patientEvidenceSchema.parse(req.body)),
+        );
+    });
+
+    r.get("/patients/me/claims/:id/evidence", async (req, res) => {
+        const actor = requireActor(req, "PATIENT");
+        res.json(await patients.listSelfEvidence(actor.id, String(req.params.id)));
     });
 
     r.post("/patients/me/claims/:id/emergency", async (req, res) => {

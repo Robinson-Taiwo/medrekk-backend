@@ -4,7 +4,13 @@ const envSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     PORT: z.coerce.number().int().default(4000),
-    AUTH_MODE: z.enum(["dev", "jwt"]).default("dev"),
+    /**
+     * Defaults to jwt, deliberately. dev mode trusts x-actor-id / x-actor-role headers with
+     * no token at all, so anyone who can reach the server can act as any patient. Defaulting
+     * to dev meant a host that simply never set AUTH_MODE served an open record store while
+     * looking entirely normal — a missing variable should fail closed, not open.
+     */
+    AUTH_MODE: z.enum(["dev", "jwt"]).default("jwt"),
     JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
     SEED_DEMO_DATA: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
     CORS_ORIGIN: z.string().default("http://localhost:3000"),
@@ -24,6 +30,11 @@ const envSchema = z
   })
   .refine((e) => !(e.NODE_ENV === "production" && e.AUTH_MODE === "dev"), {
     message: "AUTH_MODE=dev is not allowed in production",
+  })
+  // NODE_ENV is easy to leave unset on a host; a database full of real records is not. If
+  // data is being persisted, header auth is wrong whatever NODE_ENV happens to say.
+  .refine((e) => !(e.DATABASE_URL !== undefined && e.DATABASE_URL !== "" && e.AUTH_MODE === "dev"), {
+    message: "AUTH_MODE=dev is not allowed when DATABASE_URL is set",
   });
 
 export type AppConfig = z.infer<typeof envSchema>;

@@ -44,6 +44,30 @@ export const selfClaimSchema = z.object({
 });
 export type SelfClaimInput = z.infer<typeof selfClaimSchema>;
 
+/**
+ * A document the patient attaches to their own entry.
+ *
+ * The kinds are narrower than a worker's: PATIENT_CONFIRMATION and PROFESSIONAL_CONFIRMATION
+ * are attestations one person makes about another, and a patient cannot attest to themselves.
+ * ORIGINAL_CAPTURE stays out for the same reason it is out of the worker list — it records
+ * where a claim came from, which is provenance, not corroboration.
+ */
+export const patientEvidenceSchema = z.object({
+  kind: z.enum(["LAB_REPORT", "PRESCRIPTION", "DOCUMENT", "PREVIOUS_RECORD"]),
+  description: z.string().trim().min(3).max(300),
+  captureMethod: z.enum(["OCR", "TYPED", "DICTATED"]).default("TYPED"),
+  origin: z
+    .object({
+      facility: z.string().trim().min(1).max(120).optional(),
+      clinician: z.string().trim().min(1).max(120).optional(),
+      documentDate: z.string().trim().min(4).max(40).optional(),
+    })
+    .optional(),
+  /** Hex SHA-256 of the image. The image itself never leaves the phone. */
+  imageHash: z.string().trim().regex(/^[a-f0-9]{64}$/, "imageHash must be hex sha256").optional(),
+});
+export type PatientEvidenceInput = z.infer<typeof patientEvidenceSchema>;
+
 const shortList = z.array(z.string().trim().min(1).max(120)).max(20).default([]);
 
 export const emergencyProfileSchema = z.object({

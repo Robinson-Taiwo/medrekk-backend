@@ -1,6 +1,6 @@
 import type { Repositories } from "../../database/repositories.js";
-import type { ClinicalClaim, EmergencyProfile, Patient } from "../../shared/types.js";
-import type { EmergencyProfileInput, SelfClaimInput } from "../../shared/validation.js";
+import type { ClinicalClaim, EmergencyProfile, Evidence, Patient } from "../../shared/types.js";
+import type { EmergencyProfileInput, PatientEvidenceInput, SelfClaimInput } from "../../shared/validation.js";
 import { AppError } from "../../utils/errors.js";
 import { generateMedRekkCode, newId } from "../../utils/ids.js";
 import type { Gender, PatientProfile, ProfileUpdateInput } from "../../shared/profile.js";
@@ -15,7 +15,7 @@ const publicProfile = ({ patientId: _patientId, ...rest }: EmergencyProfile): Pu
 
 export class PatientService {
   constructor(
-    private readonly repos: Pick<Repositories, "patients" | "emergency" | "records" | "profiles" | "audit">,
+    private readonly repos: Pick<Repositories, "patients" | "emergency" | "records" | "profiles" | "audit" | "evidence">,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -141,6 +141,67 @@ export class PatientService {
     });
 
     return publicClaim(updated);
+  }
+
+  /**
+   * The patient attaching a document to their own entry — a photograph of a prescription, a
+   * lab printout, an old discharge note.
+   *
+   * This deliberately does NOT raise the claim's status. A worker attaching evidence lifts a
+   * claim to EVIDENCE_BACKED because a second person has looked at the paper; a patient
+   * attaching their own cannot, or every claim would corroborate itself and the whole
+   * standing system would mean nothing. What it does do is put the document in front of the
+   * next clinician, with where it says it came from and how the text was read, so the
+   * confirmation they give is a real one rather than a guess.
+   *
+   * The image stays on the phone. Only its hash travels, which is enough to prove later that
+   * the copy the patient still holds is the one that was reviewed.
+   */
+  async addSelfEvidence(patientId: string, claimId: string, input: PatientEvidenceInput): Promise<Evidence> {
+    const claim = await this.repos.records.findById(claimId);
+    if (!claim || claim.patientId !== patientId || claim.removedAt) {
+      throw new AppError(404, "CLAIM_NOT_FOUND", "That entry is not in your record.");
+    }
+    const patient = await this.repos.patients.findById(patientId);
+    const at = this.iso();
+    const evidence: Evidence = {
+      id: newId("evd"),
+      patientId,
+      claimId: claim.id,
+      kind: input.kind,
+      description: input.description,
+      addedByUserId: patientId,
+      addedByName: patient?.fullName ?? "Patient",
+      createdAt: at,
+      captureMethod: input.captureMethod,
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.imageHash ? { imageHash: input.imageHash } : {}),
+    };
+    await this.repos.evidence.add(evidence);
+
+    // The link is recorded so the document is findable, but status and verificationMethod are
+    // left exactly as they were.
+    await this.repos.records.update({ ...claim, evidenceId: evidence.id });
+
+    await this.repos.audit.append({
+      id: newId("aud"),
+      patientId,
+      type: "EVIDENCE_ADDED",
+      accessType: "NORMAL",
+      occurredAt: at,
+      requesterIdentifier: `${patient?.fullName ?? "Patient"} (PATIENT)`,
+      informationViewed: [claim.category],
+      reason: `Document attached by the patient: ${input.kind}`,
+    });
+    return evidence;
+  }
+
+  async listSelfEvidence(patientId: string, claimId: string): Promise<Evidence[]> {
+    const claim = await this.repos.records.findById(claimId);
+    if (!claim || claim.patientId !== patientId) {
+      throw new AppError(404, "CLAIM_NOT_FOUND", "That entry is not in your record.");
+    }
+    return this.repos.evidence.listForClaim(claimId);
   }
 
   async listClaims(patientId: string): Promise<PublicClaim[]> {

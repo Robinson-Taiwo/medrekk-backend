@@ -22,11 +22,29 @@ export function accessRoutes(access: AccessService): Router {
     const requesterUserId = req.auth?.role === "HEALTH_WORKER" ? req.auth.userId : undefined;
     res.status(202).json(await access.requestAccess(session, accessRequestSchema.parse(req.body), requesterUserId));
   });
+  // No requireActor: whoever holds the token may hand it back, and giving up access is
+  // never an escalation. A worker signing out calls this so the patient's list stays honest.
+  r.post("/access/:session/release", async (req, res) => {
+    const { session } = tokenParams.parse(req.params);
+    res.json(await access.release(session));
+  });
+
   r.get("/access/:session/status", async (req, res) => {
     res.json(await access.getStatus(tokenParams.parse(req.params).session));
   });
   r.get("/access/:session/record", async (req, res) => {
     res.json(await access.getRecord(tokenParams.parse(req.params).session));
+  });
+
+  // ---- health worker (authenticated) ----
+  // Keyed on the account, not the handset, so a grant survives signing out, a reinstall or a
+  // new phone. Both need a real worker token: requireActor is the whole guard here.
+  r.get("/access/mine", async (req, res) => {
+    res.json(await access.listActiveForWorker(requireActor(req, "HEALTH_WORKER").id));
+  });
+  r.post("/access/mine/:id/resume", async (req, res) => {
+    const actor = requireActor(req, "HEALTH_WORKER");
+    res.json(await access.resume(actor.id, idParams.parse(req.params).id));
   });
 
   // ---- patient (authenticated) ----

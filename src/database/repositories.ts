@@ -16,6 +16,8 @@ export interface SessionRepository {
   findById(id: string): Promise<AccessSession | undefined>;
   update(session: AccessSession): Promise<void>;
   listForPatient(patientId: string): Promise<AccessSession[]>;
+  /** Every session a given health-worker account requested, so a grant survives sign-out. */
+  listForRequester(workerUserId: string): Promise<AccessSession[]>;
 }
 export interface RecordRepository {
   claimsFor(patientId: string, scope: AccessScope): Promise<ClinicalClaim[]>;

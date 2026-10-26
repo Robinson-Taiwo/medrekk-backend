@@ -57,17 +57,33 @@ export class AccessService {
     return { session: token, patientName: patient.fullName, medrekkCode: patient.medrekkCode };
   }
 
-  private async load(token: string): Promise<AccessSession> {
-    const found = await this.repos.sessions.findByTokenHash(hashToken(token));
-    if (!found) throw new AppError(404, "SESSION_NOT_FOUND", "Access session not found.");
+  /** True while the clock still allows this session to be used. */
+  private isLive(s: AccessSession): boolean {
     const nowMs = this.deps.now().getTime();
-    const lapsed =
-      (found.status === "APPROVED" && found.grantedUntil !== undefined && Date.parse(found.grantedUntil) <= nowMs) ||
-      ((found.status === "AWAITING_REQUEST" || found.status === "PENDING") && Date.parse(found.expiresAt) <= nowMs);
-    if (!lapsed) return found;
+    if (s.status === "APPROVED") return s.grantedUntil !== undefined && Date.parse(s.grantedUntil) > nowMs;
+    if (s.status === "AWAITING_REQUEST" || s.status === "PENDING") return Date.parse(s.expiresAt) > nowMs;
+    return false;
+  }
+
+  /**
+   * Writes the lapse down rather than leaving a session sitting at APPROVED with a past
+   * grantedUntil. Every read goes through here, by token or by id, so the stored status and
+   * what the patient is shown cannot drift apart.
+   */
+  private async settle(found: AccessSession): Promise<AccessSession> {
+    const stale =
+      (found.status === "APPROVED" || found.status === "AWAITING_REQUEST" || found.status === "PENDING") &&
+      !this.isLive(found);
+    if (!stale) return found;
     const expired: AccessSession = { ...found, status: "EXPIRED" };
     await this.repos.sessions.update(expired);
     return expired;
+  }
+
+  private async load(token: string): Promise<AccessSession> {
+    const found = await this.repos.sessions.findByTokenHash(hashToken(token));
+    if (!found) throw new AppError(404, "SESSION_NOT_FOUND", "Access session not found.");
+    return this.settle(found);
   }
 
   /** requesterUserId is set only when the request carried a valid health-worker token. */
@@ -136,6 +152,70 @@ export class AccessService {
       throw new AppError(403, "NOT_SESSION_REQUESTER", "This session was not requested by your account.");
     }
     return s;
+  }
+
+  // ---- worker side ----
+
+  /**
+   * The grants this worker account is still holding.
+   *
+   * A grant belongs to the worker's account, not to the handset it was approved on. It used
+   * to live only in the phone's secure storage, so signing out — or reinstalling, or changing
+   * phone — lost it for good, while the patient went on being shown an access that was still
+   * running. The patient could end it; the worker could not see it. This is the missing half.
+   */
+  async listActiveForWorker(workerUserId: string) {
+    const all = await this.repos.sessions.listForRequester(workerUserId);
+    const live = all.filter((s) => (s.status === "APPROVED" || s.status === "PENDING") && this.isLive(s));
+    const out = [];
+    for (const s of live) {
+      const patient = await this.repos.patients.findById(s.patientId);
+      out.push({
+        id: s.id,
+        status: s.status,
+        patientName: patient?.fullName ?? "",
+        medrekkCode: patient?.medrekkCode ?? "",
+        approvedScopes: s.approvedScopes,
+        grantedUntil: s.grantedUntil,
+      });
+    }
+    return out.sort((a, b) => (b.grantedUntil ?? "").localeCompare(a.grantedUntil ?? ""));
+  }
+
+  /**
+   * Hands a still-running grant back to the account that was given it, as a fresh token.
+   *
+   * The raw token is never stored — only its hash — so the original cannot be returned. A new
+   * one is minted and the old hash replaced, which also means a token left on a phone the
+   * worker has signed out of stops working the moment they pick the grant up somewhere else.
+   *
+   * Only the account named on the session can do this, and only while the grant is live, so
+   * this gives a worker nothing the patient has not already approved.
+   */
+  async resume(workerUserId: string, sessionId: string) {
+    const raw = await this.repos.sessions.findById(sessionId);
+    // Same 404 for "no such session" and "not yours", so this cannot be used to discover
+    // which session ids exist.
+    if (!raw || raw.requesterUserId !== workerUserId) {
+      throw new AppError(404, "SESSION_NOT_FOUND", "Access session not found.");
+    }
+    const found = await this.settle(raw);
+    this.assertUsable(found);
+    if (!this.isLive(found)) throw new AppError(409, "ACCESS_NOT_ACTIVE", "This access is no longer active.");
+
+    const token = newAccessToken();
+    const rotated: AccessSession = { ...found, tokenHash: hashToken(token) };
+    await this.repos.sessions.update(rotated);
+    await this.audit(rotated, "ACCESS_RESUMED", { informationViewed: rotated.approvedScopes });
+
+    const patient = await this.repos.patients.findById(rotated.patientId);
+    return {
+      session: token,
+      status: rotated.status,
+      patientName: patient?.fullName ?? "",
+      medrekkCode: patient?.medrekkCode ?? "",
+      grantedUntil: rotated.grantedUntil,
+    };
   }
 
   private assertUsable(s: AccessSession): void {
@@ -217,6 +297,29 @@ export class AccessService {
     await this.repos.sessions.update(revoked);
     await this.audit(revoked, "ACCESS_REVOKED", { informationViewed: revoked.approvedScopes });
     return { status: revoked.status, revokedAt: revoked.revokedAt };
+  }
+
+  /**
+   * The worker handing the grant back — when they finish a visit, or sign out of the app.
+   *
+   * Holding the session token is authority enough, because releasing only ever reduces
+   * access. Without this, signing out cleared the worker's copy of the token and left the
+   * grant running on the server, so the patient went on being told somebody could see their
+   * record when no device could actually open it.
+   *
+   * Recorded as its own audit type: a patient looking at the log should be able to tell the
+   * difference between access they withdrew and access a worker gave back.
+   */
+  async release(token: string) {
+    const session = await this.load(token);
+    const live =
+      session.status === "APPROVED" || session.status === "PENDING" || session.status === "AWAITING_REQUEST";
+    if (!live) return { status: session.status };
+
+    const ended: AccessSession = { ...session, status: "REVOKED", revokedAt: this.iso() };
+    await this.repos.sessions.update(ended);
+    await this.audit(ended, "ACCESS_RELEASED", { informationViewed: ended.approvedScopes });
+    return { status: ended.status };
   }
 
   auditTrail(patientId: string) { return this.repos.audit.listForPatient(patientId); }

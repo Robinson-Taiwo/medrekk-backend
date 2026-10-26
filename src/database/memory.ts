@@ -37,6 +37,8 @@ export function createMemoryRepositories(store: MemoryStore): Repositories {
       findById: async (id) => sessions.get(id),
       update: async (s) => void sessions.set(s.id, s),
       listForPatient: async (patientId) => [...sessions.values()].filter((s) => s.patientId === patientId),
+      listForRequester: async (workerUserId) =>
+        [...sessions.values()].filter((s) => s.requesterUserId === workerUserId),
     },
     records: {
       claimsFor: async (patientId: string, scope: AccessScope) =>

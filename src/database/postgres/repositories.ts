@@ -57,9 +57,18 @@ export function createPostgresRepositories(db: Db): Repositories {
         ]),
       findByTokenHash: (hash) => selectOne<AccessSession>(db, "SELECT data FROM access_sessions WHERE token_hash = $1", [hash]),
       findById: (id) => selectOne<AccessSession>(db, "SELECT data FROM access_sessions WHERE id = $1", [id]),
-      update: (s) => run(db, "UPDATE access_sessions SET data = $2::jsonb WHERE id = $1", [s.id, json(s)]),
+      // token_hash is written too: resuming a grant mints a new token, and a stale hash here
+      // would leave the old one working and the new one unknown.
+      update: (s) =>
+        run(db, "UPDATE access_sessions SET token_hash = $2, data = $3::jsonb WHERE id = $1", [s.id, s.tokenHash, json(s)]),
       listForPatient: (patientId) =>
         selectMany<AccessSession>(db, "SELECT data FROM access_sessions WHERE patient_id = $1 ORDER BY seq", [patientId]),
+      listForRequester: (workerUserId) =>
+        selectMany<AccessSession>(
+          db,
+          "SELECT data FROM access_sessions WHERE data->>'requesterUserId' = $1 ORDER BY seq DESC",
+          [workerUserId],
+        ),
     },
     records: {
       claimsFor: (patientId: string, scope: AccessScope) =>

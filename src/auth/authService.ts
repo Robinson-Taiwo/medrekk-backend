@@ -7,11 +7,12 @@ import {
   type AuthResponse,
   type LoginInput,
   type PublicUser,
+  type CredentialSubmissionInput,
   type RegisterInput,
 } from "../shared/auth.js";
 import type { Patient } from "../shared/types.js";
 import { AppError } from "../utils/errors.js";
-import type { User, UserRepository } from "./userRepository.js";
+import type { CredentialDocumentRepository, User, UserRepository } from "./userRepository.js";
 import { normalizePhone } from "../shared/phone.js";
 
 const TOKEN_TTL = "12h"; // TODO: short-lived access token + refresh token later
@@ -34,6 +35,7 @@ function toPublic(user: User): PublicUser {
     facility: user.facility,
     credentialStatus: user.credentialStatus,
     phone: user.phone ?? null,
+    ...(user.licence ? { licence: user.licence, hasLicenceDocument: user.licence.documentId !== null } : {}),
   };
 }
 
@@ -42,6 +44,7 @@ export class AuthService {
     private readonly users: UserRepository,
     private readonly secret: string,
     private readonly provisioner: PatientProvisioner,
+    private readonly documents?: CredentialDocumentRepository,
   ) {
     if (secret.length < 32) throw new Error("JWT_SECRET must be at least 32 characters");
   }
@@ -81,6 +84,79 @@ export class AuthService {
     };
     await this.users.create(user);
     return this.issue(user);
+  }
+
+  /**
+   * A health worker saying which register they are on, and showing the licence.
+   *
+   * Nothing here is checked automatically — there is no public API to check a Nigerian
+   * registration against, and pretending otherwise would be worse than not trying. What this
+   * does is give the person approving something to check: a named register, a number to look
+   * up on it, and a photograph to compare. An approval is a human judgement, and this is the
+   * material for it.
+   *
+   * Submitting again always returns the account to PENDING. An approval refers to the
+   * document it was given, so letting a worker swap the photograph afterwards while keeping
+   * the tick would make the tick meaningless.
+   */
+  async submitCredential(userId: string, input: CredentialSubmissionInput): Promise<PublicUser> {
+    const user = await this.users.findById(userId);
+    if (!user) throw new AppError(404, "USER_NOT_FOUND", "Account not found.");
+    if (user.role !== "HEALTH_WORKER") {
+      throw new AppError(403, "NOT_A_HEALTH_WORKER", "Only health worker accounts have a credential.");
+    }
+
+    let documentId: string | null = user.licence?.documentId ?? null;
+    if (input.image) {
+      if (!this.documents) {
+        throw new AppError(503, "DOCUMENTS_UNAVAILABLE", "Licence photographs cannot be stored right now.");
+      }
+      const docId = `crd_${randomUUID()}`;
+      documentId = docId;
+      await this.documents.put({
+        id: docId,
+        userId: user.id,
+        mime: input.image.mime,
+        base64: input.image.base64,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    const updated: User = {
+      ...user,
+      licence: {
+        body: input.body,
+        number: input.number,
+        profession: input.profession,
+        submittedAt: new Date().toISOString(),
+        documentId,
+      },
+      credentialStatus: "PENDING",
+    };
+    await this.users.update(updated);
+    return toPublic(updated);
+  }
+
+  /**
+   * A health worker turning on their own record.
+   *
+   * Clinicians are patients too, and one email could only ever be one of the two: the account
+   * row carries a single role and a patient record was created only at registration, so a
+   * doctor who wanted their own record had to register again with a different address.
+   *
+   * The account keeps its role; what changes is that it gains a patientId. A fresh token is
+   * returned because the old one was minted without one, and the patient endpoints read the
+   * patient from the token.
+   */
+  async addOwnRecord(userId: string): Promise<AuthResponse> {
+    const user = await this.users.findById(userId);
+    if (!user) throw new AppError(404, "USER_NOT_FOUND", "Account not found.");
+    if (user.patientId) return this.issue(user);
+
+    const patient = await this.provisioner.provision(user.fullName);
+    const updated: User = { ...user, patientId: patient.id };
+    await this.users.update(updated);
+    return this.issue(updated);
   }
 
   async login(input: LoginInput): Promise<AuthResponse> {

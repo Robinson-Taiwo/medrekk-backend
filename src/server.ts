@@ -5,7 +5,7 @@ import { migrate } from "./database/postgres/migrations.js";
 import { createPostgresEncounterRepository } from "./database/postgres/encounters.js";
 import { createPostgresReferralRepository } from "./database/postgres/referrals.js";
 import { createPostgresRepositories } from "./database/postgres/repositories.js";
-import { createPostgresUserRepository } from "./database/postgres/users.js";
+import { createPostgresCredentialDocumentRepository, createPostgresUserRepository } from "./database/postgres/users.js";
 import { parseKey } from "./utils/crypto.js";
 
 async function main(): Promise<void> {
@@ -29,6 +29,7 @@ async function main(): Promise<void> {
       config: { ...config, SEED_DEMO_DATA: false },
       repos: createPostgresRepositories(db),
       users: createPostgresUserRepository(db),
+      documents: createPostgresCredentialDocumentRepository(db),
       referrals: createPostgresReferralRepository(db, key),
       encounters: createPostgresEncounterRepository(db),
     };

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { CredentialStatus } from './types.js'
+import { LICENCE_BODIES, type CredentialStatus, type LicenceClaim } from './types.js'
 import { normalizePhone } from './phone.js'
 
 export const RoleSchema = z.enum(['PATIENT', 'HEALTH_WORKER'])
@@ -30,6 +30,30 @@ export const PhoneUpdateSchema = z.object({
 })
 export type PhoneUpdateInput = z.infer<typeof PhoneUpdateSchema>
 
+/**
+ * What a health worker submits so somebody can decide whether to approve them.
+ *
+ * Asked for after registration rather than during it: a worker can look for a patient and
+ * record a visit straight away, and only needs this before anything they record can be
+ * marked clinically verified. Putting it in the sign-up form would have been a wall in front
+ * of the useful part of the product for the sake of a step most people will do once.
+ *
+ * The image cap keeps a submission inside the 1mb request body limit with room to spare;
+ * base64 is about a third larger than the bytes it carries.
+ */
+export const CredentialSubmissionSchema = z.object({
+  body: z.enum(LICENCE_BODIES),
+  number: z.string().trim().min(3).max(40),
+  profession: z.string().trim().min(2).max(80),
+  image: z
+    .object({
+      mime: z.enum(['image/jpeg', 'image/png']),
+      base64: z.string().min(100).max(700_000),
+    })
+    .optional(),
+})
+export type CredentialSubmissionInput = z.infer<typeof CredentialSubmissionSchema>
+
 export const LoginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1).max(128),
@@ -58,6 +82,10 @@ export interface PublicUser {
   facility: string | null
   phone: string | null
   credentialStatus: CredentialStatus | null // HEALTH_WORKER only; null for patients
+  /** HEALTH_WORKER only. Present once they have submitted their registration details. */
+  licence?: LicenceClaim
+  /** True when a photograph of the licence is on file for an approver to look at. */
+  hasLicenceDocument?: boolean
 }
 
 export interface AuthResponse {

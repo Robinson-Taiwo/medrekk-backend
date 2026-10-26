@@ -38,4 +38,20 @@ const envSchema = z
   });
 
 export type AppConfig = z.infer<typeof envSchema>;
-export const loadConfig = (): AppConfig => envSchema.parse(process.env);
+
+/**
+ * Refusing to start is the right answer to a misconfigured environment — a server that boots
+ * anyway and serves records without checking tokens is worse than one that is down. But the
+ * only thing the operator sees is one line in a log, so that line has to name the variable
+ * and the fix rather than printing a parser's JSON at them.
+ */
+export const loadConfig = (): AppConfig => {
+  const parsed = envSchema.safeParse(process.env);
+  if (parsed.success) return parsed.data;
+
+  const problems = parsed.error.issues.map((issue) => {
+    const where = issue.path.join(".");
+    return where.length > 0 ? `${where}: ${issue.message}` : issue.message;
+  });
+  throw new Error(`Refusing to start. Fix the environment:\n  - ${problems.join("\n  - ")}`);
+};

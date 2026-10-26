@@ -1,5 +1,5 @@
-import type { User, UserRepository } from "../../auth/userRepository.js";
-import type { CredentialStatus } from "../../shared/types.js";
+import type { CredentialDocumentRepository, User, UserRepository } from "../../auth/userRepository.js";
+import type { CredentialDocument, CredentialStatus, LicenceClaim } from "../../shared/types.js";
 import { AppError } from "../../utils/errors.js";
 import { newId } from "../../utils/ids.js";
 
@@ -7,6 +7,7 @@ export interface AdminDeps {
   users: UserRepository;
   adminEmails: readonly string[];
   now: () => Date;
+  documents?: CredentialDocumentRepository;
 }
 
 export interface HealthWorkerSummary {
@@ -16,6 +17,10 @@ export interface HealthWorkerSummary {
   facility: string | null;
   credentialStatus: CredentialStatus;
   createdAt: string;
+  /** What they say their registration is. Absent until they submit it. */
+  licence?: LicenceClaim;
+  /** Whether there is a photograph to look at alongside the number. */
+  hasDocument: boolean;
 }
 
 export interface CredentialChange {
@@ -36,6 +41,8 @@ const toSummary = (u: User): HealthWorkerSummary => ({
   facility: u.facility,
   credentialStatus: u.credentialStatus ?? "PENDING",
   createdAt: u.createdAt,
+  ...(u.licence ? { licence: u.licence } : {}),
+  hasDocument: Boolean(u.licence?.documentId),
 });
 
 export class AdminService {
@@ -81,6 +88,17 @@ export class AdminService {
       });
     }
     return toSummary(updated);
+  }
+
+  /**
+   * The photograph itself, for the person deciding. Behind the same admin check as everything
+   * else here: a licence is a document about a named person and is not public.
+   */
+  async licenceDocument(adminUserId: string, targetUserId: string): Promise<CredentialDocument> {
+    await this.assertAdmin(adminUserId);
+    const doc = await this.deps.documents?.findByUserId(targetUserId);
+    if (!doc) throw new AppError(404, "NO_DOCUMENT", "No licence photograph has been submitted.");
+    return doc;
   }
 
   async credentialLog(adminUserId: string): Promise<CredentialChange[]> {

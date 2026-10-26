@@ -25,6 +25,11 @@ export function adminRoutes(admin: AdminService): Router {
     res.json(await admin.setCredential(callerId(req), userId, status));
   });
 
+  r.get("/admin/health-workers/:userId/licence", async (req, res) => {
+    const { userId } = userIdParams.parse(req.params);
+    res.json(await admin.licenceDocument(callerId(req), userId));
+  });
+
   r.get("/admin/credential-log", async (req, res) => {
     res.json(await admin.credentialLog(callerId(req)));
   });

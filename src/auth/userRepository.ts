@@ -1,5 +1,5 @@
 import type { Role } from '../shared/auth.js'
-import type { CredentialStatus } from '../shared/types.js'
+import type { CredentialDocument, CredentialStatus, LicenceClaim } from '../shared/types.js'
 
 export interface User {
   id: string
@@ -10,6 +10,8 @@ export interface User {
   patientId: string | null
   facility: string | null
   credentialStatus: CredentialStatus | null
+  /** HEALTH_WORKER only. What they say their registration is, for an approver to check. */
+  licence?: LicenceClaim
   phone?: string
   /** bcrypt hash of the 4-digit USSD PIN. Unset means USSD is off for this account. */
   ussdPinHash?: string
@@ -18,6 +20,12 @@ export interface User {
   /** ISO timestamp until which USSD is refused for this account. */
   ussdLockedUntil?: string
   createdAt: string
+}
+
+/** Where the photographs of licences live. Separate so a user listing never carries images. */
+export interface CredentialDocumentRepository {
+  put(doc: CredentialDocument): Promise<void>
+  findByUserId(userId: string): Promise<CredentialDocument | null>
 }
 
 export interface UserRepository {
@@ -67,5 +75,18 @@ export class InMemoryUserRepository implements UserRepository {
 
   async listByRole(role: Role): Promise<User[]> {
     return [...this.byId.values()].filter((u) => u.role === role)
+  }
+}
+
+/** One document per worker: a new photograph replaces the one before it. */
+export class InMemoryCredentialDocumentRepository implements CredentialDocumentRepository {
+  private readonly byUser = new Map<string, CredentialDocument>()
+
+  async put(doc: CredentialDocument): Promise<void> {
+    this.byUser.set(doc.userId, doc)
+  }
+
+  async findByUserId(userId: string): Promise<CredentialDocument | null> {
+    return this.byUser.get(userId) ?? null
   }
 }

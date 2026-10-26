@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { AuthService } from "../auth/authService.js";
 import { requireAuth } from "../middleware/auth.js";
-import { LoginSchema, PhoneUpdateSchema, RegisterSchema } from "../shared/auth.js";
+import { CredentialSubmissionSchema, LoginSchema, PhoneUpdateSchema, RegisterSchema } from "../shared/auth.js";
 import { AppError } from "../utils/errors.js";
 
 export function createAuthRouter(authService: AuthService): Router {
@@ -24,6 +24,21 @@ export function createAuthRouter(authService: AuthService): Router {
     if (!req.auth) throw new AppError(401, "UNAUTHENTICATED", "Authentication required.");
     const { phone } = PhoneUpdateSchema.parse(req.body);
     res.json(await authService.setPhone(req.auth.userId, phone));
+  });
+
+  /**
+   * A health worker submitting their registration details and a photograph of the licence,
+   * so an approver has something to check rather than a name and a free-text facility.
+   */
+  router.post("/me/credential", requireAuth, async (req, res) => {
+    if (!req.auth) throw new AppError(401, "UNAUTHENTICATED", "Authentication required.");
+    res.json(await authService.submitCredential(req.auth.userId, CredentialSubmissionSchema.parse(req.body)));
+  });
+
+  /** A health worker turning on their own patient record. Returns a new token carrying it. */
+  router.post("/me/patient-record", requireAuth, async (req, res) => {
+    if (!req.auth) throw new AppError(401, "UNAUTHENTICATED", "Authentication required.");
+    res.status(201).json(await authService.addOwnRecord(req.auth.userId));
   });
 
   return router;

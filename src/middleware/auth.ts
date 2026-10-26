@@ -51,8 +51,24 @@ export const requireAuth: RequestHandler = (req, _res, next) => {
  */
 export function requireActor(req: Request, role: ActorRole): Actor {
   if (!req.auth) throw new AppError(401, "UNAUTHENTICATED", "Authentication required.");
+
+  /*
+   * Acting as a patient means holding a patient record, not being labelled PATIENT.
+   *
+   * A clinician is also a person with a medical history, and the old check — role must equal
+   * PATIENT — meant one email could only ever be one of the two. A health worker who turns on
+   * their own record gains a patientId and reaches their own record with it. The id comes from
+   * the token either way, so this grants nobody anything beyond their own record.
+   *
+   * Being a health worker is still the account's role, because that is what it is: an
+   * assertion about the person which somebody else has to approve.
+   */
+  if (role === "PATIENT") {
+    const patientId = req.auth.patientId;
+    if (!patientId) throw new AppError(403, "FORBIDDEN", "No patient record is linked to this account.");
+    return { id: patientId, role };
+  }
+
   if (req.auth.role !== role) throw new AppError(403, "FORBIDDEN", "This account type can't do that.");
-  const id = role === "PATIENT" ? req.auth.patientId : req.auth.userId;
-  if (!id) throw new AppError(403, "FORBIDDEN", "No patient record is linked to this account.");
-  return { id, role };
+  return { id: req.auth.userId, role };
 }

@@ -2,6 +2,42 @@ export const VERIFICATION_STATUSES = ["UNVERIFIED", "SELF_REPORTED", "EVIDENCE_B
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 
 export const CREDENTIAL_STATUSES = ["PENDING", "APPROVED"] as const;
+
+/**
+ * The register a health worker's licence is held on. Named rather than free text so the
+ * approver knows which public register to check the number against — an approval is a person
+ * looking a number up, and that is only possible if the register is known.
+ */
+export const LICENCE_BODIES = ["MDCN", "NMCN", "PCN", "MLSCN", "OTHER"] as const;
+export type LicenceBody = (typeof LICENCE_BODIES)[number];
+
+/** What a worker claims about their registration, and when they claimed it. */
+export interface LicenceClaim {
+  body: LicenceBody;
+  /** As printed on the licence. Never checked automatically; a person reads it. */
+  number: string;
+  /** Their own words: "Medical officer", "Registered nurse". */
+  profession: string;
+  submittedAt: string;
+  /** The photograph of the licence, when one was attached. */
+  documentId: string | null;
+}
+
+/**
+ * A photograph of a licence, held only so an approver can look at it.
+ *
+ * Kept out of the user row on purpose: every sign-in and every admin listing reads users, and
+ * none of them should drag a few hundred kilobytes of image along. Stored as base64 because
+ * there is no object store here — a real deployment would put the bytes behind a signed URL
+ * and keep only the key.
+ */
+export interface CredentialDocument {
+  id: string;
+  userId: string;
+  mime: "image/jpeg" | "image/png";
+  base64: string;
+  createdAt: string;
+}
 export type CredentialStatus = (typeof CREDENTIAL_STATUSES)[number];
 
 export const EVIDENCE_KINDS = [

@@ -4,9 +4,9 @@ import express, { type ErrorRequestHandler, type Express } from "express";
 import rateLimit from "express-rate-limit";
 import { ZodError } from "zod";
 import { AuthService } from "./auth/authService.js";
-import { InMemoryUserRepository } from "./auth/userRepository.js";
+import { InMemoryCredentialDocumentRepository, InMemoryUserRepository } from "./auth/userRepository.js";
 import type { AppConfig } from "./config.js";
-import type { UserRepository } from "./auth/userRepository.js";
+import type { CredentialDocumentRepository, UserRepository } from "./auth/userRepository.js";
 import type { ReferralRepository } from "./database/referralRepository.js";
 import { createMemoryRepositories, emptyStore, seedDemoData } from "./database/memory.js";
 import type { Repositories } from "./database/repositories.js";
@@ -42,6 +42,7 @@ export interface AppOptions {
   repos?: Repositories;
   cloud?: CloudAdapter;
   users?: UserRepository;
+  documents?: CredentialDocumentRepository;
   referrals?: ReferralRepository;
   encounters?: EncounterRepository;
 }
@@ -62,7 +63,8 @@ export function buildApp(opts: AppOptions): Express {
   // ---- Patients and auth ----
   const patientService = new PatientService(repos, now);
   const users: UserRepository = opts.users ?? new InMemoryUserRepository();
-  const authService = new AuthService(users, opts.config.JWT_SECRET, patientService);
+  const documents: CredentialDocumentRepository = opts.documents ?? new InMemoryCredentialDocumentRepository();
+  const authService = new AuthService(users, opts.config.JWT_SECRET, patientService, documents);
   if (opts.config.SEED_DEMO_DATA) {
     // In-memory create resolves immediately, so void is safe here.
     void users.create({
@@ -103,7 +105,7 @@ export function buildApp(opts: AppOptions): Express {
     now,
   });
   const verificationService = new VerificationService({ repos, users, access: accessService, now });
-  const adminService = new AdminService({ users, adminEmails, now });
+  const adminService = new AdminService({ users, adminEmails, now, documents });
   const ussdService = new UssdService({ repos, users, now });
 
   const app = express();

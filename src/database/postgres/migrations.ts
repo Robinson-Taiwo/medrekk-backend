@@ -100,6 +100,17 @@ CREATE TABLE encounters (
 CREATE INDEX encounters_patient_idx ON encounters (patient_id, seq);
 `,
   },
+  {
+    // One row per worker: a resubmitted photograph replaces the one before it, so there is
+    // never a question of which image an approval was based on.
+    id: "003_credential_documents",
+    sql: `
+CREATE TABLE credential_documents (
+  user_id text PRIMARY KEY,
+  data jsonb NOT NULL
+);
+`,
+  },
 ];
 
 /** Applies any migration not yet recorded. Each one runs as a single multi-statement query, so it is atomic. */

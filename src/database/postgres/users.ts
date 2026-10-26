@@ -1,4 +1,5 @@
-import type { User, UserRepository } from "../../auth/userRepository.js";
+import type { CredentialDocumentRepository, User, UserRepository } from "../../auth/userRepository.js";
+import type { CredentialDocument } from "../../shared/types.js";
 import { AppError } from "../../utils/errors.js";
 import type { Db, SqlValue } from "./db.js";
 
@@ -56,6 +57,29 @@ export function createPostgresUserRepository(db: Db): UserRepository {
     listByRole: async (role) => {
       const res = await db.query<DataRow<User>>("SELECT data FROM users WHERE role = $1 ORDER BY data->>'createdAt'", [role]);
       return res.rows.map((r) => r.data);
+    },
+  };
+}
+
+/**
+ * Photographs of licences. A separate table so that reading a user — which happens on every
+ * authenticated request — never drags an image along with it.
+ */
+export function createPostgresCredentialDocumentRepository(db: Db): CredentialDocumentRepository {
+  return {
+    put: (doc) =>
+      write(
+        db,
+        `INSERT INTO credential_documents (user_id, data) VALUES ($1, $2::jsonb)
+         ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data`,
+        [doc.userId, JSON.stringify(doc)],
+      ),
+    findByUserId: async (userId) => {
+      const res = await db.query<DataRow<CredentialDocument>>(
+        "SELECT data FROM credential_documents WHERE user_id = $1",
+        [userId],
+      );
+      return res.rows[0]?.data ?? null;
     },
   };
 }

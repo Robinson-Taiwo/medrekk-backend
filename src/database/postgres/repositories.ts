@@ -124,8 +124,50 @@ export function createPostgresRepositories(db: Db): Repositories {
     audit: {
       append: (e: AuditEvent) =>
         run(db, "INSERT INTO audit_events (id, patient_id, data) VALUES ($1, $2, $3::jsonb)", [e.id, e.patientId, json(e)]),
-      listForPatient: (patientId) =>
-        selectMany<AuditEvent>(db, "SELECT data FROM audit_events WHERE patient_id = $1 ORDER BY seq", [patientId]),
+      /**
+       * Newest first, one page at a time. `seq` is the bigserial the table already had, so
+       * the cursor is positional and unaffected by rows appended while somebody reads.
+       * One row is fetched beyond the page purely to know whether there is a next one.
+       */
+      listForPatient: async (patientId, { limit, cursor, types, since, until }) => {
+        /*
+         * Filtered and paged in one query. `seq` is the bigserial the table already had, so
+         * the cursor is positional and unaffected by rows appended while somebody reads —
+         * an offset would show them a row twice or skip one. One row is fetched beyond the
+         * page purely to know whether there is a next one.
+         */
+        const where: string[] = ["patient_id = $1"];
+        const params: SqlValue[] = [patientId];
+        const next = (): string => `$${params.length + 1}`;
+
+        if (types && types.length > 0) {
+          where.push(`data->>'type' = ANY(${next()})`);
+          params.push([...types] as unknown as SqlValue);
+        }
+        if (since) {
+          where.push(`data->>'occurredAt' >= ${next()}`);
+          params.push(since);
+        }
+        if (until) {
+          where.push(`data->>'occurredAt' < ${next()}`);
+          params.push(until);
+        }
+        if (cursor) {
+          where.push(`seq < (SELECT seq FROM audit_events WHERE id = ${next()})`);
+          params.push(cursor);
+        }
+        where.push(`true`);
+        const limitPlaceholder = next();
+        params.push(limit + 1);
+
+        const rows = await selectMany<AuditEvent>(
+          db,
+          `SELECT data FROM audit_events WHERE ${where.join(" AND ")} ORDER BY seq DESC LIMIT ${limitPlaceholder}`,
+          params,
+        );
+        const items = rows.slice(0, limit);
+        return { items, ...(rows.length > limit ? { nextCursor: items[items.length - 1]?.id } : {}) };
+      },
     },
     sync: {
       has: async (operationId) => {

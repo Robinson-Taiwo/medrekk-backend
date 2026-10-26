@@ -65,7 +65,27 @@ export function createMemoryRepositories(store: MemoryStore): Repositories {
     },
     audit: {
       append: async (e) => void audit.push(e),
-      listForPatient: async (patientId) => audit.filter((e) => e.patientId === patientId),
+      /**
+       * Newest first, which here means reverse insertion order: two events can share an
+       * `occurredAt` to the millisecond, and sorting on it alone would let them swap places
+       * between two reads and make the cursor skip one.
+       */
+      listForPatient: async (patientId, { limit, cursor, types, since, until }) => {
+        // Filtered before paging, so a page is a page of what was asked for rather than a
+        // page of everything with most of it then thrown away.
+        const wanted = types ? new Set<string>(types) : null;
+        const mine = audit
+          .filter((e) => e.patientId === patientId)
+          .filter((e) => !wanted || wanted.has(e.type))
+          .filter((e) => !since || e.occurredAt >= since)
+          .filter((e) => !until || e.occurredAt < until)
+          .reverse();
+        const from = cursor ? mine.findIndex((e) => e.id === cursor) + 1 : 0;
+        const start = cursor && from === 0 ? mine.length : from; // unknown cursor -> nothing more
+        const items = mine.slice(start, start + limit);
+        const next = mine[start + limit];
+        return { items, ...(next ? { nextCursor: items[items.length - 1]?.id } : {}) };
+      },
     },
     sync: {
       has: async (id) => syncOps.has(id),

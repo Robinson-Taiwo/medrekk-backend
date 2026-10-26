@@ -76,7 +76,7 @@ describe("a worker handing access back", () => {
     await request(app).post(`/access/${token}/release`).expect(200);
 
     const audit = await request(app).get("/patients/me/audit").set(patient).expect(200);
-    const types = (audit.body as { type: string }[]).map((e) => e.type);
+    const types = (audit.body.items as { type: string }[]).map((e) => e.type);
     expect(types).toContain("ACCESS_RELEASED");
     expect(types).not.toContain("ACCESS_REVOKED");
   });

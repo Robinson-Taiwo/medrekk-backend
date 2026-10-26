@@ -84,7 +84,7 @@ describe("emergency profile verification", () => {
     expect(after.body.verifiedByName).toBeUndefined();
 
     const audit = await request(app).get("/patients/me/audit").set(patient).expect(200);
-    const types: string[] = audit.body.map((e: { type: string }) => e.type);
+    const types: string[] = audit.body.items.map((e: { type: string }) => e.type);
     expect(types).toContain("EMERGENCY_PROFILE_VERIFIED");
   });
 

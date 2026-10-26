@@ -8,6 +8,19 @@ export const CREDENTIAL_STATUSES = ["PENDING", "APPROVED"] as const;
  * approver knows which public register to check the number against — an approval is a person
  * looking a number up, and that is only possible if the register is known.
  */
+/**
+ * A page of an append-only list.
+ *
+ * Cursor rather than offset: the audit trail gains rows while somebody is reading it, and an
+ * offset would quietly show them the same row twice or skip one. The cursor is the id of the
+ * last row returned, which is stable whatever arrives after it.
+ */
+export interface Page<T> {
+  items: T[];
+  /** Pass back as `cursor` for the next page. Absent when there is nothing more. */
+  nextCursor?: string;
+}
+
 export const LICENCE_BODIES = ["MDCN", "NMCN", "PCN", "MLSCN", "OTHER"] as const;
 export type LicenceBody = (typeof LICENCE_BODIES)[number];
 
@@ -214,6 +227,50 @@ export type AuditType =
   | "ENCOUNTER_DISCARDED"
   | "ENCOUNTER_RECORDED"
   | "ENCOUNTER_REVIEWED";
+
+/**
+ * The audit trail grouped the way a patient would ask about it, rather than by the names the
+ * code happens to use. "Who looked at my record" is one question; the twenty-odd event types
+ * behind it are an implementation detail nobody should have to learn to filter by.
+ *
+ * Defined here so the phone and the server cannot disagree about what a group contains — the
+ * client sends the group name, never a list of types it assembled itself.
+ */
+export const AUDIT_GROUPS = {
+  /** Somebody read something of yours. The question most people open this screen to ask. */
+  views: [
+    "RECORD_VIEWED",
+    "EMERGENCY_ACCESSED",
+    "USSD_ACCESSED",
+    "REFERRAL_VIEWED",
+  ],
+  /** The permission itself: asked for, granted, refused, ended. */
+  access: [
+    "ACCESS_SESSION_STARTED",
+    "ACCESS_REQUESTED",
+    "ACCESS_APPROVED",
+    "ACCESS_DENIED",
+    "ACCESS_REVOKED",
+    "ACCESS_RELEASED",
+    "ACCESS_RESUMED",
+  ],
+  /** Your record changed, by whoever's hand. */
+  changes: [
+    "EVIDENCE_ADDED",
+    "CLAIM_VERIFIED",
+    "CLAIM_REMOVED",
+    "EMERGENCY_PROFILE_VERIFIED",
+    "EMERGENCY_CARD_UPDATED",
+    "ENCOUNTER_RECORDED",
+    "ENCOUNTER_REVIEWED",
+    "ENCOUNTER_DISCARDED",
+  ],
+  /** Referrals you handed out. */
+  sharing: ["REFERRAL_CREATED", "REFERRAL_REVOKED"],
+} as const satisfies Record<string, readonly AuditType[]>;
+
+export type AuditGroup = keyof typeof AUDIT_GROUPS;
+export const AUDIT_GROUP_NAMES = Object.keys(AUDIT_GROUPS) as AuditGroup[];
 
 export interface AuditEvent {
   id: string;

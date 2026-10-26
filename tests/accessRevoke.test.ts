@@ -47,7 +47,7 @@ describe("requester facility", () => {
     const list = await request(app).get("/patients/me/access-requests").set(patient).expect(200);
     expect(list.body[0].requester.facility).toBe("General Hospital");
     const audit = await request(app).get("/patients/me/audit").set(patient).expect(200);
-    expect(JSON.stringify(audit.body)).toContain("General Hospital");
+    expect(JSON.stringify(audit.body.items)).toContain("General Hospital");
   });
   it("stays optional", async () => {
     const app = makeApp();
@@ -75,7 +75,7 @@ describe("active access and revoke", () => {
     const past = await request(app).get("/patients/me/access-sessions?status=past").set(patient).expect(200);
     expect(past.body[0].status).toBe("REVOKED");
     const audit = await request(app).get("/patients/me/audit").set(patient).expect(200);
-    expect(audit.body.some((e: { type: string }) => e.type === "ACCESS_REVOKED")).toBe(true);
+    expect(audit.body.items.some((e: { type: string }) => e.type === "ACCESS_REVOKED")).toBe(true);
   });
 
   it("cannot revoke twice, and another patient cannot revoke", async () => {

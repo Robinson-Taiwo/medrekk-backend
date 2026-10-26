@@ -2,7 +2,7 @@ import type {
   AccessScope, AccessSession, AccessStatus, AuditEvent, AuditType, ClinicalClaim,
 } from "../../shared/types.js";
 import type { AccessDecisionInput, AccessLookupInput, AccessRequestInput } from "../../shared/validation.js";
-import type { Repositories } from "../../database/repositories.js";
+import type { AuditQuery, Repositories } from "../../database/repositories.js";
 import { AppError } from "../../utils/errors.js";
 import type { UserRepository } from "../../auth/userRepository.js";
 import type { PushMessage, PushSender } from "../notify/pushService.js";
@@ -379,5 +379,12 @@ export class AccessService {
     return { status: ended.status };
   }
 
-  auditTrail(patientId: string) { return this.repos.audit.listForPatient(patientId); }
+  /**
+   * The patient's own log of who touched their record. Paged because it is append-only and
+   * gains a row for every view, every emergency scan and every dial-in — the one list here
+   * that has no natural ceiling.
+   */
+  auditTrail(patientId: string, query: AuditQuery) {
+    return this.repos.audit.listForPatient(patientId, query);
+  }
 }

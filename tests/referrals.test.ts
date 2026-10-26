@@ -73,7 +73,7 @@ describe("referrals", () => {
     await request(app).get(`/referral/${ref.shareId}`).expect(200);
     await request(app).get(`/referral/${ref.shareId}`).expect(200);
     const audit = await request(app).get("/patients/me/audit").set(auth).expect(200);
-    const types = (audit.body as { type: string }[]).map((e) => e.type);
+    const types = (audit.body.items as { type: string }[]).map((e) => e.type);
     expect(types).toContain("REFERRAL_CREATED");
     expect(types.filter((t) => t === "REFERRAL_VIEWED")).toHaveLength(2);
   });

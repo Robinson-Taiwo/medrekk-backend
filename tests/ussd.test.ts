@@ -185,7 +185,7 @@ describe("branch 1: the patient's own record", () => {
     await dial(h.app, `1*${GOOD_PIN}*2`).expect(200);
 
     const log = await request(h.app).get("/patients/me/audit").set(h.auth).expect(200);
-    const entries = log.body as { type: string; informationViewed?: string[] }[];
+    const entries = log.body.items as { type: string; informationViewed?: string[] }[];
     const ussd = entries.find((e) => e.type === "USSD_ACCESSED");
     expect(ussd).toBeDefined();
     expect(ussd?.informationViewed).toContain("ALLERGIES");
@@ -233,7 +233,7 @@ describe("branch 2: emergency lookup by code", () => {
     await dial(h.app, `2*${me.body.medrekkCode as string}`, STRANGER).expect(200);
 
     const log = await request(h.app).get("/patients/me/audit").set(h.auth).expect(200);
-    const entries = log.body as { type: string; requesterIdentifier?: string }[];
+    const entries = log.body.items as { type: string; requesterIdentifier?: string }[];
     const hit = entries.find((e) => e.type === "EMERGENCY_ACCESSED");
     expect(hit?.requesterIdentifier).toContain(STRANGER);
   });

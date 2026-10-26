@@ -75,7 +75,13 @@ suite("postgres adapter", () => {
     });
     await repos.audit.append(event("a1"));
     await repos.audit.append(event("a2"));
-    expect((await repos.audit.listForPatient(patient.id)).map((e) => e.id)).toEqual(["a1", "a2"]);
+    // Newest first now, and paged.
+    const firstPage = await repos.audit.listForPatient(patient.id, { limit: 1 });
+    expect(firstPage.items.map((e) => e.id)).toEqual(["a2"]);
+    expect(firstPage.nextCursor).toBe("a2");
+    const secondPage = await repos.audit.listForPatient(patient.id, { limit: 1, cursor: firstPage.nextCursor });
+    expect(secondPage.items.map((e) => e.id)).toEqual(["a1"]);
+    expect(secondPage.nextCursor).toBeUndefined();
 
     const session: AccessSession = {
       id: "ses_t1", tokenHash: "hash-1", patientId: patient.id, status: "AWAITING_REQUEST", requestedScopes: [],

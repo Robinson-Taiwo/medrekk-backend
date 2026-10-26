@@ -144,7 +144,7 @@ describe("a patient recording a document they hold", () => {
     const { app, auth } = await patient();
     await request(app).post("/patients/me/entries").set(auth).send(entry).expect(201);
     const log = await request(app).get("/patients/me/audit").set(auth).expect(200);
-    const types = (log.body as { type: string }[]).map((e) => e.type);
+    const types = (log.body.items as { type: string }[]).map((e) => e.type);
     expect(types).toContain("ENCOUNTER_RECORDED");
   });
 

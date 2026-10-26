@@ -99,7 +99,7 @@ describe("a patient attaching their own document", () => {
     await request(app).post(`/patients/me/claims/${id}/evidence`).set(patient).send(doc).expect(201);
 
     const audit = await request(app).get("/patients/me/audit").set(patient).expect(200);
-    const row = audit.body.find((e: { type: string }) => e.type === "EVIDENCE_ADDED");
+    const row = audit.body.items.find((e: { type: string }) => e.type === "EVIDENCE_ADDED");
     expect(row).toBeTruthy();
     expect(row.requesterIdentifier).toContain("(PATIENT)");
   });

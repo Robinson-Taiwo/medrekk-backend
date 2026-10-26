@@ -1,5 +1,6 @@
 import type {
-  AccessScope, AccessSession, AuditEvent, ClinicalClaim, EmergencyProfile, Evidence, Patient, SyncOperation,
+  Page,
+  AccessScope, AccessSession, AuditEvent, AuditType, ClinicalClaim, EmergencyProfile, Evidence, Patient, SyncOperation,
   VerificationEvent,
 } from "../shared/types.js";
 
@@ -38,9 +39,24 @@ export interface EmergencyRepository {
   profileFor(patientId: string): Promise<EmergencyProfile | undefined>;
   save(profile: EmergencyProfile): Promise<void>;
 }
+export interface PageQuery {
+  limit: number;
+  /** Id of the last row the caller already has. */
+  cursor?: string;
+}
+
+export interface AuditQuery extends PageQuery {
+  /** Only these event types. Absent means every type. */
+  types?: readonly AuditType[];
+  /** Inclusive ISO lower bound on occurredAt. */
+  since?: string;
+  /** Exclusive ISO upper bound on occurredAt. */
+  until?: string;
+}
 export interface AuditRepository {
   append(event: AuditEvent): Promise<void>;
-  listForPatient(patientId: string): Promise<AuditEvent[]>;
+  /** Newest first. The trail is append-only and unbounded, so it is never returned whole. */
+  listForPatient(patientId: string, query: AuditQuery): Promise<Page<AuditEvent>>;
 }
 export interface SyncRepository {
   has(operationId: string): Promise<boolean>;

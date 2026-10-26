@@ -1,12 +1,28 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
+import { AUDIT_GROUPS, AUDIT_GROUP_NAMES, type AuditGroup } from "../shared/types.js";
 import { accessDecisionSchema, accessLookupSchema, accessRequestSchema } from "../shared/validation.js";
 import type { AccessService } from "../services/access/accessService.js";
 import { requireActor } from "../middleware/auth.js";
 
 const tokenParams = z.object({ session: z.string().min(20).max(100) });
 const idParams = z.object({ id: z.string().min(1).max(100) });
+
+/**
+ * A sane default and a hard ceiling, so no caller can ask for the whole trail at once.
+ *
+ * `group` rather than a list of event types: the grouping is defined once, on the server, and
+ * a client that sent its own list would quietly drift out of step the moment a new event type
+ * was added — the row would exist and appear under no filter.
+ */
+const auditQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  cursor: z.string().min(1).max(100).optional(),
+  group: z.enum(AUDIT_GROUP_NAMES as [AuditGroup, ...AuditGroup[]]).optional(),
+  since: z.string().datetime().optional(),
+  until: z.string().datetime().optional(),
+});
 
 export function accessRoutes(access: AccessService): Router {
   const r = Router();
@@ -65,7 +81,9 @@ export function accessRoutes(access: AccessService): Router {
     res.json(await access.revoke(actor.id, idParams.parse(req.params).id));
   });
   r.get("/patients/me/audit", async (req, res) => {
-    res.json(await access.auditTrail(requireActor(req, "PATIENT").id));
+    const actor = requireActor(req, "PATIENT");
+    const { group, ...rest } = auditQuery.parse(req.query);
+    res.json(await access.auditTrail(actor.id, { ...rest, ...(group ? { types: AUDIT_GROUPS[group] } : {}) }));
   });
   return r;
 }

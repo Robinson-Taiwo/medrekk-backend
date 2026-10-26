@@ -57,7 +57,7 @@ describe("normal access flow", () => {
   const rec = await request(app).get(`/access/${token}/record`).expect(200);
   expect(JSON.stringify(rec.body)).not.toContain("pat_demo_amaka");
   const audit = await request(app).get("/patients/me/audit").set(patient).expect(200);
-  const types: string[] = audit.body.map((e: { type: string }) => e.type);
+  const types: string[] = audit.body.items.map((e: { type: string }) => e.type);
   expect(types).toEqual(expect.arrayContaining([
     "ACCESS_SESSION_STARTED", "ACCESS_REQUESTED", "ACCESS_APPROVED", "RECORD_VIEWED",
   ]));
@@ -97,7 +97,7 @@ describe("emergency access", () => {
     expect(r.body.criticalAllergies).toEqual(["Penicillin"]);
     expect(r.body.patientId).toBeUndefined();
     const audit = await request(app).get("/patients/me/audit").set(patient).expect(200);
-    expect(audit.body.some((e: { type: string }) => e.type === "EMERGENCY_ACCESSED")).toBe(true);
+    expect(audit.body.items.some((e: { type: string }) => e.type === "EMERGENCY_ACCESSED")).toBe(true);
   });
 });
 

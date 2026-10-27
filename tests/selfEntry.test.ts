@@ -170,6 +170,66 @@ describe("a patient recording a document they hold", () => {
     expect(listed.body[0].authoredBy).toBe("PATIENT");
   });
 
+  it("carries the whole document in the list, so a cached list can open every detail offline", async () => {
+    const { app, auth } = await patient();
+    await request(app).post("/patients/me/entries").set(auth).send(entry).expect(201);
+
+    const listed = await request(app).get("/patients/me/entries").set(auth).expect(200);
+    expect(listed.body[0].rawInput).toBe(entry.note);
+    // The one-liner for the card is still separate, and still short.
+    expect(listed.body[0].preview.length).toBeLessThanOrEqual(140);
+  });
+
+  it("removes a document and everything it produced", async () => {
+    const { app, auth } = await patient();
+    const created = await request(app).post("/patients/me/entries").set(auth).send(entry).expect(201);
+    expect(created.body.createdClaimIds.length).toBeGreaterThan(0);
+
+    await request(app).delete(`/patients/me/entries/${created.body.id as string}`).set(auth).expect(200);
+
+    // Gone from the document list.
+    const listed = await request(app).get("/patients/me/entries").set(auth).expect(200);
+    expect(listed.body).toEqual([]);
+
+    // And so are the claims it created — a visit whose medicines stayed behind would leave the
+    // record asserting facts whose source has just been withdrawn.
+    const claims = await request(app).get("/patients/me/claims").set(auth).expect(200);
+    expect(claims.body).toEqual([]);
+  });
+
+  it("will not remove a document twice, or one belonging to someone else", async () => {
+    const { app, auth } = await patient();
+    const created = await request(app).post("/patients/me/entries").set(auth).send(entry).expect(201);
+    const id = created.body.id as string;
+
+    await request(app).delete(`/patients/me/entries/${id}`).set(auth).expect(200);
+    await request(app).delete(`/patients/me/entries/${id}`).set(auth).expect(404);
+
+    const other = await request(app)
+      .post("/auth/register")
+      .send({
+        email: `kemi-${Math.random().toString(36).slice(2)}@example.com`,
+        password: "password-123",
+        fullName: "Kemi Ade",
+        role: "PATIENT",
+      })
+      .expect(201);
+    await request(app)
+      .delete(`/patients/me/entries/${id}`)
+      .set({ Authorization: `Bearer ${other.body.token as string}` })
+      .expect(404);
+  });
+
+  it("writes the removal into the audit trail", async () => {
+    const { app, auth } = await patient();
+    const created = await request(app).post("/patients/me/entries").set(auth).send(entry).expect(201);
+    await request(app).delete(`/patients/me/entries/${created.body.id as string}`).set(auth).expect(200);
+
+    const trail = await request(app).get("/patients/me/audit").set(auth).expect(200);
+    const types = (trail.body.items ?? trail.body).map((e: { type: string }) => e.type);
+    expect(types).toContain("ENCOUNTER_DISCARDED");
+  });
+
   it("does not list another patient's entries", async () => {
     // Both accounts on the SAME app, or each would get its own store and this would pass
     // whether or not listForPatient filtered at all.

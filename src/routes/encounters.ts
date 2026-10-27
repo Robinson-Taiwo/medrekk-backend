@@ -55,6 +55,11 @@ export function encounterRoutes(encounters: EncounterService): Router {
     res.json(await encounters.listForPatient(actor.id));
   });
 
+  r.delete("/patients/me/entries/:id", async (req, res) => {
+    const actor = requireActor(req, "PATIENT");
+    res.json(await encounters.removeForPatient(actor.id, String(req.params.id)));
+  });
+
   r.get("/patients/me/encounters/:id", async (req, res) => {
     const actor = requireActor(req, "PATIENT");
     res.json(await encounters.encounterForPatient(actor.id, String(req.params.id)));

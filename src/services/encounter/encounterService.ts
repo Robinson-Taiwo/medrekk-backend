@@ -303,8 +303,18 @@ export class EncounterService {
         recordedByFacility: e.workerFacility,
         recordedAt: e.reviewedAt ?? e.createdAt,
         claimIds: e.createdClaimIds,
-        /** A one-line stand-in for the document, so the list needs no second request. */
+        /** A one-line stand-in for the document, for the row on the record screen. */
         preview: e.rawInput.replace(/\s+/g, " ").trim().slice(0, 140),
+        /*
+         * The whole document, in the list.
+         *
+         * It looks wasteful and it is the opposite: the record screen caches this response, so
+         * one request puts every document on the handset. Fetching details one at a time meant a
+         * patient could see their cards offline and open none of them — which is the shape of
+         * the complaint, and a fair one. A document is capped at 5000 characters, so a patient
+         * with twenty of them is carrying under 100KB.
+         */
+        rawInput: e.rawInput,
         hasImage: e.imageHash !== undefined,
         /*
          * The fingerprint, not the picture. The image itself never leaves the handset, so this
@@ -314,6 +324,54 @@ export class EncounterService {
         ...(e.imageHash ? { imageHash: e.imageHash } : {}),
         ...(e.origin ? { origin: e.origin } : {}),
       }));
+  }
+
+  /**
+   * Taking a document back off the record.
+   *
+   * Everything it produced goes with it — a visit whose medicines stayed behind would leave the
+   * record asserting facts whose source the patient has just withdrawn. Soft-deleted rather than
+   * erased, so the audit trail can still say that something was removed on a date without saying
+   * what it was.
+   *
+   * A patient may remove a document a health worker recorded. That is the product's whole claim:
+   * if the record belongs to the patient, it belongs to them including the parts they disagree
+   * with. The removal is written into the trail, which is what keeps it honest.
+   */
+  async removeForPatient(patientId: string, encounterId: string) {
+    const found = await this.deps.encounters.findById(encounterId);
+    if (!found || found.patientId !== patientId || found.status !== "REVIEWED") {
+      throw new AppError(404, "ENCOUNTER_NOT_FOUND", "Visit not found.");
+    }
+
+    const at = this.iso();
+    const categories = new Set<string>();
+
+    for (const claimId of found.createdClaimIds) {
+      const claim = await this.deps.repos.records.findById(claimId);
+      if (!claim || claim.patientId !== patientId || claim.removedAt) continue;
+      await this.deps.repos.records.update({ ...claim, removedAt: at });
+      categories.add(claim.category);
+
+      // An allergy the patient put on their emergency card comes off with it. Leaving it there
+      // would show a stranger something the record no longer holds.
+      if (claim.category === "ALLERGIES" && claim.emergencyDecision === "ADDED") {
+        const profile = await this.deps.repos.emergency.profileFor(patientId);
+        if (profile) {
+          await this.deps.repos.emergency.save({
+            ...profile,
+            criticalAllergies: profile.criticalAllergies.filter((entry: string) => entry !== claim.value),
+            lastConfirmedAt: at,
+          });
+        }
+      }
+    }
+
+    const discarded: Encounter = { ...found, status: "DISCARDED" };
+    await this.deps.encounters.update(discarded);
+    await this.audit(discarded, "ENCOUNTER_DISCARDED", [...categories]);
+
+    return { removed: true, claimsRemoved: found.createdClaimIds.length };
   }
 
   async encounterForPatient(patientId: string, encounterId: string) {
